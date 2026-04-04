@@ -1254,6 +1254,12 @@ class ProcessingPipeline:
                 await self._emit("region_processing", "prefrontal_cortex", "executive",
                     "Fast path: automatic processing (Schneider & Shiffrin 1977)")
 
+        # ── Immediate broadcast: PFC response available NOW ──
+        # Send to dashboard via WebSocket so user sees the response instantly,
+        # before Broca, encoding, or consolidation run.
+        if result.response:
+            await self._emit("broadcast", result.response, "pipeline")
+
         # ══════════════════════════════════════════════════════════════
         # Phase 4: Memory Encoding (McGaugh 2004, Hasselmo 2006)
         # RUNS IN BACKGROUND — encoding does not block response delivery.
@@ -1520,7 +1526,6 @@ class ProcessingPipeline:
         if broadcast:
             await self.salience.process(broadcast)
             signals_count += 1
-        await self._emit("broadcast", result.response, "pipeline")
         await self._emit("network_switch", "ECN", "DMN", "task_complete")
 
         # ── Hypothalamus: quick resource check (passes result to background)
