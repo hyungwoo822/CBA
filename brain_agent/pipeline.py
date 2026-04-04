@@ -1348,14 +1348,23 @@ class ProcessingPipeline:
                         )
 
                 # User-input fact extraction (LLM call — runs in background)
+                # Multi-entity triples stored as BOTH user_input (ground truth)
+                # AND agent_about_user (agent's understanding) to align both graphs.
                 if self.pfc.llm_provider and _comprehension.get("intent"):
                     try:
                         user_extract = await self._extract_user_facts(_input_text, _comprehension)
                         if user_extract:
                             u_ents = user_extract.get("entities", [])
                             u_rels = user_extract.get("relations", [])
+                            # Store as user ground truth
                             await self.memory.store_semantic_facts(
                                 entities=u_ents, relations=u_rels, origin="user_input",
+                            )
+                            # ALSO store as agent understanding — this is what the agent
+                            # extracted, so it IS the agent's model of the user's world.
+                            # This makes Agent Model mirror User Graph structure.
+                            await self.memory.store_semantic_facts(
+                                entities=u_ents, relations=u_rels, origin="agent_about_user",
                             )
                             await self._store_identity_facts_realtime(u_rels, source="user_input")
                     except Exception:
