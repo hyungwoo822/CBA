@@ -1,0 +1,60 @@
+# Secrets & env
+.env
+.env.*
+!.env.example
+
+# Claude Code / Vibe coding
+.claude/
+.superpowers/
+docs/superpowers/
+temp.md
+temp/
+data/*
+docs/*
+docs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Node.js
+node_modules/
+dashboard/node_modules/
+dashboard/dist/
+
+# Build output
+dist/
+build/
+
+# Databases & runtime data (local user data)
+temp_data/
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# OS
+desktop.ini
+
+# Logs & temp
+*.log
+.server-stopped
+.server.log
+.server.pid
