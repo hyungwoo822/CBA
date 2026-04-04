@@ -409,15 +409,27 @@ class SemanticStore:
             # Relation recall (exact — relation types are small set)
             relation_recall = len(user_rels & agent_rels) / len(user_rels) if user_rels else 0.0
 
-            # Weighted composite
-            cloning_score = (
+            # Weighted recall composite (existing logic)
+            raw_recall = (
                 node_recall * 0.45 +       # Same concepts?
                 relation_recall * 0.25 +   # Same relationship types?
                 edge_recall * 0.30         # Same triples (fuzzy)?
             )
 
+            # Learning curve maturity: cloning requires sufficient data.
+            # Even perfect recall on 2 edges doesn't mean you've cloned someone.
+            # maturity = 1 - e^(-total_edges / growth_constant)
+            import math
+            GROWTH_CONSTANT = 15
+            total_edges = len(user_rows) + len(agent_rows)
+            maturity = 1.0 - math.exp(-total_edges / GROWTH_CONSTANT)
+
+            cloning_score = raw_recall * maturity
+
             return {
                 "cloning_score": round(cloning_score, 4),
+                "raw_recall": round(raw_recall, 4),
+                "maturity": round(maturity, 4),
                 "node_recall": round(node_recall, 4),
                 "edge_recall": round(edge_recall, 4),
                 "relation_recall": round(relation_recall, 4),

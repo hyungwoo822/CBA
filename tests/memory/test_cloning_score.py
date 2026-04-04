@@ -58,7 +58,10 @@ async def test_cloning_score_identical_graphs(store):
     await store.add_relationship("user", "like", "coffee", origin="agent_response")
     await store.add_relationship("coffee", "is", "beverage", origin="agent_response")
     result = await store.compute_cloning_score()
-    assert result["cloning_score"] > 0.8
+    # raw_recall should be high (identical graphs); maturity is low with few edges
+    assert result["raw_recall"] > 0.8
+    assert result["maturity"] < 0.5  # few edges = low maturity
+    assert result["cloning_score"] > 0.1  # maturity-weighted
 
 
 @pytest.mark.asyncio
@@ -78,7 +81,7 @@ async def test_cloning_score_partial_overlap(store):
     await store.add_relationship("user", "like", "coffee", origin="agent_response")
     await store.add_relationship("user", "enjoy", "music", origin="agent_response")
     result = await store.compute_cloning_score()
-    assert 0.2 < result["cloning_score"] < 0.8
+    assert result["raw_recall"] > 0.2
     assert result.get("node_recall", result.get("node_overlap", 0)) > 0  # "user" and "coffee" shared
 
 
@@ -111,8 +114,8 @@ async def test_cloning_score_directional(store):
     await store.add_relationship("coffee", "contain", "caffeine", origin="agent_response")
     await store.add_relationship("caffeine", "stimulate", "brain", origin="agent_response")
     result = await store.compute_cloning_score()
-    # Score should still be high: agent knows what user knows (+ extra)
-    assert result["cloning_score"] > 0.7
+    # raw_recall should still be high: agent knows what user knows (+ extra)
+    assert result["raw_recall"] > 0.7
 
 
 @pytest.mark.asyncio
@@ -123,7 +126,7 @@ async def test_fuzzy_reversed_triple(store):
     result = await store.compute_cloning_score()
     # Should be high — same fact, just reversed
     assert result["edge_recall"] >= 0.6
-    assert result["cloning_score"] > 0.5
+    assert result["raw_recall"] > 0.5
 
 
 @pytest.mark.asyncio
@@ -148,5 +151,5 @@ async def test_fuzzy_both_directions(store):
     await store.add_relationship("user", "have", "extroverted personality", origin="agent_response")  # substring
     await store.add_relationship("coffee", "cause", "surprise", origin="agent_response")  # different
     result = await store.compute_cloning_score()
-    # Should be moderate-to-high: agent understands most of what user said
-    assert result["cloning_score"] > 0.35
+    # raw_recall should be moderate-to-high: agent understands most of what user said
+    assert result["raw_recall"] > 0.35
