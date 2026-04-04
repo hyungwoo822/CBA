@@ -262,6 +262,20 @@ class ProcessingPipeline:
             if fn:
                 await fn(*args, **kwargs)
 
+    @staticmethod
+    def _strip_korean_particles(text: str) -> str:
+        """Strip trailing Korean particles from entity names."""
+        import re
+        # Order matters: longer particles first
+        particles = [
+            '이야', '에서', '한테', '야', '는', '은', '가', '이',
+            '를', '을', '도', '에', '의', '로', '으로',
+        ]
+        for p in particles:
+            if text.endswith(p) and len(text) > len(p):
+                return text[:-len(p)]
+        return text
+
     async def _store_identity_facts_realtime(self, relations: list, source: str = "realtime") -> int:
         """Store durable user-related facts as identity_facts immediately.
 
@@ -281,6 +295,9 @@ class ProcessingPipeline:
             if len(rel) < 3:
                 continue
             subj, relation, obj = str(rel[0]).lower(), str(rel[1]), str(rel[2])
+            # Strip Korean particles from entity values
+            obj = self._strip_korean_particles(obj)
+            subj = self._strip_korean_particles(subj)
             try:
                 conf = float(rel[3]) if len(rel) >= 4 else 0.7
             except (ValueError, TypeError):
@@ -349,6 +366,10 @@ class ProcessingPipeline:
             '["119","cause","bad mood",0.8,"CAUSAL"],'
             '["user","experience","bad mood",1.0,"EMOTION"]]\n'
             "- Confidence: 1.0=explicit, 0.8=implied, 0.6=inferred, 0.4=guess\n"
+            "- STRIP Korean particles from names: '형푸야'→'hyungpu', '현우는'→'hyunwoo'.\n"
+            "  Particles: 야/이야/는/은/가/이/를/을/도/에/에서/한테/의\n"
+            "  '나는 X야' → name is X, NOT Xya.\n"
+            "- If user corrects a fact, output the CORRECTED value with confidence 1.0.\n"
             "- category: PREFERENCE|ACTION|ATTRIBUTE|SOCIAL|CAUSAL|SPATIAL|TEMPORAL|IDENTITY|EMOTION\n"
             "- Produce at least 2-3 triples per statement. Return empty ONLY if truly nothing."
         )

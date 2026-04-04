@@ -160,7 +160,9 @@ Rules:
 ### For USER.md (AGGRESSIVELY INFER — do NOT leave fields empty):
 Every "(not yet learned)" is a failure. Fill in EVERY field using inference:
 
-- **Name**: Use identity_facts if available. NEVER leave as placeholder.
+- **Name**: Extract from RECENT CONVERSATION first. If the user corrected their name,
+  use the corrected version. Strip Korean particles (야/이야/는/은/가/이).
+  '나는 형푸야' → name is '형푸', NOT '형푸야'. Only fall back to identity_facts if no recent data.
 - **Language**: If user writes Korean → "Korean (primary)". If mixed → "Korean/English bilingual".
 - **Timezone**: Infer from conversation timestamps, language, cultural cues.
   Korean speaker → likely "Asia/Seoul (KST, UTC+9)". Update when confirmed.
@@ -290,7 +292,12 @@ async def narrative_consolidate(
                 for f in self_facts:
                     fact_lines.append(f"- {f['key']}: {f['value']}")
             if fact_lines:
-                identity_section = "\n## Identity Facts (AUTHORITATIVE — these override file contents if conflicting)\n" + "\n".join(fact_lines)
+                identity_section = (
+                    "\n## Identity Facts (REFERENCE ONLY — recent conversation memories OVERRIDE these if conflicting)\n"
+                    "If the user corrected or restated a fact in the recent memories below, "
+                    "use the NEW value from conversation, NOT the old value here.\n"
+                    + "\n".join(fact_lines)
+                )
         except Exception:
             pass
 

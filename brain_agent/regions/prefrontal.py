@@ -52,6 +52,11 @@ ENTITY_EXTRACTION_INSTRUCTION = (
     "  0.4 = weak guess / might be temporary\n"
     "- category: PREFERENCE|ACTION|ATTRIBUTE|SOCIAL|CAUSAL|SPATIAL|TEMPORAL|IDENTITY|EMOTION|GENERAL\n"
     "- Handle typos: '안녀ㅇ'→'hello', '체해서'→'indigestion'\n"
+    "- STRIP Korean particles from names/entities: '형푸야'→'hyungpu', '현우는'→'hyunwoo',\n"
+    "  '커피를'→'coffee'. Particles to strip: 야/이야/는/은/가/이/를/을/도/에/에서/한테/의\n"
+    "- For NAMES: if user says '나는 X야' or '내 이름은 X야', the name is X (without 야).\n"
+    "  '나는 형푸야' → name is 'hyungpu', NOT 'hyungpuya'. Always strip trailing particles.\n"
+    "- If user CORRECTS a previous fact, use the NEW value with confidence 1.0.\n"
     "- Use CONSISTENT entity names across turns: same concept = same English name\n"
     "- EVERY user statement should produce at least 2-3 triples including multi-entity edges."
 )
