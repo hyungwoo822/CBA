@@ -18,7 +18,6 @@ export { addFilesToStore }
 export function ChatInput() {
   const text = useBrainStore((s) => s.chatInputText)
   const setChatInputText = useBrainStore((s) => s.setChatInputText)
-  const loading = useBrainStore((s) => s.chatLoading)
   const isAudioMode = useBrainStore((s) => s.isAudioMode)
   const setAudioMode = useBrainStore((s) => s.setAudioMode)
   const setAudioState = useBrainStore((s) => s.setAudioState)
@@ -78,8 +77,8 @@ export function ChatInput() {
             type="text"
             value={text}
             onChange={handleTextChange}
-            placeholder={loading ? 'Processing...' : isAudioMode ? 'Audio mode active...' : 'Ask anything...'}
-            disabled={loading || isAudioMode}
+            placeholder={isAudioMode ? 'Audio mode active...' : 'Ask anything...'}
+            disabled={isAudioMode}
           />
           <input
             ref={fileInputRef}
@@ -107,7 +106,7 @@ export function ChatInput() {
               <line x1="12" y1="19" x2="12" y2="22"/>
             </svg>
           </button>
-          <button type="submit" className="btn-send" disabled={loading || isAudioMode || (!text.trim() && attachedFiles.length === 0)}>
+          <button type="submit" className="btn-send" disabled={isAudioMode || (!text.trim() && attachedFiles.length === 0)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="19" x2="12" y2="5"/>
               <polyline points="5 12 12 5 19 12"/>

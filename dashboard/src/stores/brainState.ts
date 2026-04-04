@@ -220,7 +220,7 @@ export const useBrainStore = create<BrainState>((set) => ({
   submitChat: async () => {
     const s = useBrainStore.getState()
     const text = s.chatInputText.trim()
-    if ((!text && s.attachedFiles.length === 0) || s.chatLoading) return
+    if (!text && s.attachedFiles.length === 0) return
 
     const msgFiles = s.attachedFiles.map((f) => ({ name: f.name, type: f.type, url: f.url }))
     s.addChatMessage({ role: 'user', text, files: msgFiles.length > 0 ? msgFiles : undefined, ts: Date.now() })
