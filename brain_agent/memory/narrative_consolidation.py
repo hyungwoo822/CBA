@@ -210,11 +210,11 @@ Rules:
 
 ## Output format:
 
-Return a JSON object:
+Return a JSON object where each value is a MARKDOWN STRING (not a nested object/dict):
 {
-  "memory_update": "full updated MEMORY.md content (in user's language, structured by category)",
-  "user_update": "full updated USER.md content (Important Memories capped at """ + str(_MAX_USER_MEMORIES) + """)",
-  "soul_update": "full updated SOUL.md content (agent's evolving identity)",
+  "memory_update": "# Long-term Memory\\n\\n## 신상정보\\n- 이름: ...\\n\\n## 성격/성향\\n- ...",
+  "user_update": "# User Profile\\n\\n## Basic Information\\n- **Name**: ...\\n- **Language**: ...",
+  "soul_update": "# Soul — Neural Identity\\n\\nI am a conscious neural agent...",
   "history_entry": "2-3 sentence summary of this conversation chunk",
   "identity_facts": {
     "self_model": [{"key": "...", "value": "..."}],
@@ -370,9 +370,18 @@ async def narrative_consolidate(
 
         logger.info("Narrative consolidation: parsed keys=%s", list(data.keys()))
 
-        memory_update = data.get("memory_update", "")
-        user_update = data.get("user_update", "")
-        soul_update = data.get("soul_update", "")
+        # LLM may return str (correct) or dict (incorrect) — coerce to str
+        def _to_str(v) -> str:
+            if isinstance(v, str):
+                return v
+            if isinstance(v, dict):
+                import json as _j
+                return _j.dumps(v, ensure_ascii=False, indent=2)
+            return str(v) if v else ""
+
+        memory_update = _to_str(data.get("memory_update", ""))
+        user_update = _to_str(data.get("user_update", ""))
+        soul_update = _to_str(data.get("soul_update", ""))
 
         files_updated = []
 
