@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from unittest.mock import AsyncMock
 from brain_agent.pipeline import ProcessingPipeline
@@ -96,10 +97,13 @@ async def test_pipeline_works_without_emitter(memory):
 
 
 async def test_memory_encoded_in_pipeline(memory):
-    """Memory encoding now happens inside the pipeline, not after."""
+    """Memory encoding happens in background after response is returned."""
+    import asyncio
     pipeline = ProcessingPipeline(memory=memory)
     result = await pipeline.process_request("test memory encoding")
     assert result.memory_encoded is True
+    # Background task needs a moment to complete encoding
+    await asyncio.sleep(0.3)
     staging_count = await memory.staging.count_unconsolidated()
     assert staging_count >= 1
 
@@ -312,6 +316,7 @@ async def test_staging_content_is_structured(tmp_path):
     await mm.initialize()
     pipeline = ProcessingPipeline(memory=mm, llm_provider=None)
     await pipeline.process_request("What is Python used for?")
+    await asyncio.sleep(0.3)  # Wait for background encoding
 
     items = await mm.staging.get_unconsolidated()
     assert len(items) >= 1
@@ -338,6 +343,7 @@ async def test_enriched_memory_flow_end_to_end(tmp_path):
         pipeline = ProcessingPipeline(memory=mm, llm_provider=None)
 
         await pipeline.process_request("Find the authentication bug in the login module")
+        await asyncio.sleep(0.3)  # Wait for background encoding
 
         # 1. Working Memory: should have intent + keywords metadata
         wm_items = mm.working.get_slots()

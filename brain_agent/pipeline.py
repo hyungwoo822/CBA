@@ -1160,8 +1160,8 @@ class ProcessingPipeline:
 
         # ══════════════════════════════════════════════════════════════
         # Phase 4: Memory Encoding (McGaugh 2004, Hasselmo 2006)
-        # ALWAYS runs — every conversation is encoded to hippocampus
-        # regardless of whether BG selected an action.
+        # RUNS IN BACKGROUND — encoding does not block response delivery.
+        # The response is available; hippocampal encoding proceeds async.
         # ══════════════════════════════════════════════════════════════
 
         etag = input_signal.emotional_tag
@@ -1214,85 +1214,145 @@ class ProcessingPipeline:
         if surprise > 0.6:
             lr = min(1.0, lr * (1.0 + (surprise - 0.5) * 0.5))
 
-        await self.memory.encode(
-            content=encode_content,
-            entities=encode_entities,
-            emotional_tag=emotional_tag_dict,
-            learning_rate=lr,
-            modality=encode_modality,
-        )
-        result.memory_encoded = True
-        await self._emit("signal_flow", "prefrontal_cortex", "hippocampus", "ENCODE", 0.6)
-        await self._emit("region_activation", "hippocampus", 0.7, "active")
-        await self._emit("region_processing", "hippocampus", "phase_4",
-            f"Encoded to hippocampus: {encode_modality} modality, strength={lr:.2f}")
-        await self._step()
+        # ── Background post-response work ──────────────────────────────
+        # Capture all variables needed, then schedule as background task.
+        # Response is returned immediately; encoding + KG + consolidation
+        # proceed without blocking the user.
 
-        # Semantic fact storage (Eichenbaum 2000) — 3-layer origin system
-        # Layer 1: PFC response-based extraction
-        if plan_signal:
-            extracted = plan_signal.metadata.get("extracted_entities", {})
-            kg_entities = extracted.get("entities", [])
-            about_user = extracted.get("about_user", [])
-            knowledge = extracted.get("knowledge", [])
-            logger.info("KG extraction: %d entities, %d about_user, %d knowledge from PFC",
-                        len(kg_entities), len(about_user), len(knowledge))
+        _plan_signal = plan_signal
+        _comprehension = dict(comprehension)
+        _input_text = text
+        _hypo_result_ref = [None]  # mutable ref for hypothalamus result
 
-            # Fallback: use Wernicke keywords if PFC didn't extract
-            kw = comprehension.get("keywords", [])
-            if kw and not kg_entities:
-                kg_entities = kw
-            if kw and not about_user and not knowledge and comprehension.get("intent"):
-                intent = comprehension["intent"]
-                for keyword in kw[:3]:
-                    about_user.append(["user", intent, keyword, 0.6, "ACTION"])
-
-            # Store agent's understanding of user (for cloning score)
-            if about_user:
-                facts_au = [f"{r[0]} {r[1].replace('_', ' ')} {r[2]}" for r in about_user if len(r) >= 3]
-                await self.memory.store_semantic_facts(
-                    entities=kg_entities,
-                    relations=about_user,
-                    facts=facts_au if facts_au else None,
-                    origin="agent_about_user",
-                )
-                logger.info("KG stored (agent_about_user): %d relations", len(about_user))
-
-                # Immediately store durable facts as identity_facts for TPJ
-                await self._store_identity_facts_realtime(about_user, source="pfc_extraction")
-
-            # Store general knowledge (NOT used for cloning)
-            if knowledge:
-                facts_k = [f"{r[0]} {r[1].replace('_', ' ')} {r[2]}" for r in knowledge if len(r) >= 3]
-                await self.memory.store_semantic_facts(
-                    entities=kg_entities,
-                    relations=knowledge,
-                    facts=facts_k if facts_k else None,
-                    origin="agent_knowledge",
-                )
-                logger.info("KG stored (agent_knowledge): %d relations", len(knowledge))
-
-        # Layer 2: User-input-based fact extraction (direct from what user said)
-        # Wernicke already analyzed the input — use intent + keywords to extract
-        # user facts WITHOUT depending on PFC response interpretation
-        if self.pfc.llm_provider and comprehension.get("intent"):
+        async def _background_post_response() -> None:
+            """Phase 4 encoding + KG storage + Phase 5 consolidation (non-blocking)."""
             try:
-                user_extract = await self._extract_user_facts(text, comprehension)
-                if user_extract:
-                    u_ents = user_extract.get("entities", [])
-                    u_rels = user_extract.get("relations", [])
-                    await self.memory.store_semantic_facts(
-                        entities=u_ents,
-                        relations=u_rels,
-                        origin="user_input",
-                    )
-                    logger.info("KG stored (user): %d entities, %d relations",
-                                len(u_ents), len(u_rels))
+                # ── Phase 4: Hippocampal encoding ──
+                await self.memory.encode(
+                    content=encode_content,
+                    entities=encode_entities,
+                    emotional_tag=emotional_tag_dict,
+                    learning_rate=lr,
+                    modality=encode_modality,
+                )
+                await self._emit("signal_flow", "prefrontal_cortex", "hippocampus", "ENCODE", 0.6)
+                await self._emit("region_activation", "hippocampus", 0.7, "active")
+                await self._emit("region_processing", "hippocampus", "phase_4",
+                    f"Encoded to hippocampus: {encode_modality} modality, strength={lr:.2f}")
 
-                    # Immediately store durable user facts as identity_facts
-                    await self._store_identity_facts_realtime(u_rels, source="user_input")
-            except Exception:
-                logger.warning("User fact extraction failed", exc_info=True)
+                # ── Semantic fact storage (Eichenbaum 2000) ──
+                if _plan_signal:
+                    _extracted = _plan_signal.metadata.get("extracted_entities", {})
+                    kg_entities = _extracted.get("entities", [])
+                    about_user = _extracted.get("about_user", [])
+                    knowledge = _extracted.get("knowledge", [])
+                    logger.info("KG extraction: %d entities, %d about_user, %d knowledge from PFC",
+                                len(kg_entities), len(about_user), len(knowledge))
+
+                    kw = _comprehension.get("keywords", [])
+                    if kw and not kg_entities:
+                        kg_entities = kw
+                    if kw and not about_user and not knowledge and _comprehension.get("intent"):
+                        intent = _comprehension["intent"]
+                        for keyword in kw[:3]:
+                            about_user.append(["user", intent, keyword, 0.6, "ACTION"])
+
+                    if about_user:
+                        facts_au = [f"{r[0]} {r[1].replace('_', ' ')} {r[2]}" for r in about_user if len(r) >= 3]
+                        await self.memory.store_semantic_facts(
+                            entities=kg_entities, relations=about_user,
+                            facts=facts_au if facts_au else None, origin="agent_about_user",
+                        )
+                        await self._store_identity_facts_realtime(about_user, source="pfc_extraction")
+
+                    if knowledge:
+                        facts_k = [f"{r[0]} {r[1].replace('_', ' ')} {r[2]}" for r in knowledge if len(r) >= 3]
+                        await self.memory.store_semantic_facts(
+                            entities=kg_entities, relations=knowledge,
+                            facts=facts_k if facts_k else None, origin="agent_knowledge",
+                        )
+
+                # User-input fact extraction (LLM call — runs in background)
+                if self.pfc.llm_provider and _comprehension.get("intent"):
+                    try:
+                        user_extract = await self._extract_user_facts(_input_text, _comprehension)
+                        if user_extract:
+                            u_ents = user_extract.get("entities", [])
+                            u_rels = user_extract.get("relations", [])
+                            await self.memory.store_semantic_facts(
+                                entities=u_ents, relations=u_rels, origin="user_input",
+                            )
+                            await self._store_identity_facts_realtime(u_rels, source="user_input")
+                    except Exception:
+                        logger.warning("User fact extraction failed", exc_info=True)
+
+                # ── Phase 5: Consolidation ──
+                staging_count = await self.memory.staging.count_unconsolidated()
+                hypo_result = _hypo_result_ref[0]
+                should_consolidate = (
+                    (hypo_result and hypo_result.type == SignalType.CONSOLIDATION_TRIGGER)
+                    or await self.memory.consolidation.should_consolidate()
+                )
+                logger.info("Consolidation check: %d unconsolidated, should_consolidate=%s",
+                             staging_count, should_consolidate)
+
+                try:
+                    staging_snapshot = await self.memory.staging.get_unconsolidated()
+                except Exception:
+                    staging_snapshot = []
+
+                if should_consolidate:
+                    await self._emit("region_processing", "hippocampus", "phase_5",
+                        "Consolidation triggered — transferring memories")
+                    await self.memory.consolidate()
+
+                if staging_snapshot:
+                    try:
+                        from brain_agent.memory.narrative_consolidation import narrative_consolidate
+                        llm = getattr(self.pfc, 'llm_provider', None) or self._llm_provider
+                        if not llm:
+                            logger.error("Phase 5: NO LLM provider for narrative consolidation.")
+                        else:
+                            success = await narrative_consolidate(
+                                staging_snapshot, llm,
+                                semantic_store=self.memory.semantic,
+                            )
+                            logger.info("Narrative consolidation result: %s", success)
+                            if success:
+                                self.tpj.reload_schema()
+                                self.mpfc.reload_schema()
+                    except Exception as e:
+                        logger.warning("Narrative consolidation failed: %s", e)
+
+                # Layer 3: Dreaming
+                if self.dreaming.should_dream():
+                    try:
+                        from brain_agent.memory.narrative_consolidation import _read_file, _write_file
+                        promotion_text = await self.dreaming.run_cycle()
+                        if promotion_text:
+                            current_memory = _read_file("memory/MEMORY.md")
+                            _write_file("memory/MEMORY.md",
+                                        current_memory.rstrip() + "\n\n" + promotion_text + "\n")
+                    except Exception as e:
+                        logger.warning("Dreaming cycle failed: %s", e)
+
+                # Neuromodulator decay + brain state save
+                self.neuro_ctrl.decay()
+                await self._emit("neuromodulator_update", **self.neuromodulators.snapshot())
+                try:
+                    await self.save_brain_state()
+                except Exception:
+                    pass
+
+            except Exception as e:
+                logger.error("Background post-response failed: %s", e, exc_info=True)
+
+        # Mark encoding as scheduled (flag set immediately, encoding runs in background)
+        result.memory_encoded = True
+
+        # Schedule background work — does NOT block response return
+        import asyncio as _aio
+        _aio.create_task(_background_post_response())
 
         # ══════════════════════════════════════════════════════════════
         # Phase 7: Speech Production (Levelt 1989)
@@ -1347,7 +1407,7 @@ class ProcessingPipeline:
             except Exception:
                 pass  # Prediction storage is best-effort
 
-        # ── GWT Broadcast (Baars 1988)
+        # ── GWT Broadcast (Baars 1988) — lightweight, in-memory
         self.workspace.submit(
             Signal(
                 type=SignalType.GWT_BROADCAST,
@@ -1357,18 +1417,6 @@ class ProcessingPipeline:
             salience=0.7,
             goal_relevance=0.8,
         )
-        if etag and etag.arousal > 0.5:
-            self.workspace.submit(
-                Signal(
-                    type=SignalType.EMOTIONAL_TAG,
-                    source="amygdala",
-                    payload={"valence": etag.valence, "arousal": etag.arousal},
-                    emotional_tag=etag,
-                ),
-                salience=etag.arousal,
-                goal_relevance=0.5,
-            )
-
         broadcast = self.workspace.compete()
         if broadcast:
             await self.salience.process(broadcast)
@@ -1376,8 +1424,7 @@ class ProcessingPipeline:
         await self._emit("broadcast", result.response, "pipeline")
         await self._emit("network_switch", "ECN", "DMN", "task_complete")
 
-        # ── Hypothalamus + Brainstem: resource monitoring
-        staging_count = await self.memory.staging.count_unconsolidated()
+        # ── Hypothalamus: quick resource check (passes result to background)
         error_rate = (
             self.acc.error_accumulator / self.acc.strategy_switch_threshold
             if self.acc.strategy_switch_threshold > 0
@@ -1386,117 +1433,18 @@ class ProcessingPipeline:
         hypo_signal = Signal(
             type=SignalType.RESOURCE_STATUS,
             source="pipeline",
-            payload={
-                "pending_requests": 0,
-                "staging_count": staging_count,
-                "error_rate": min(1.0, error_rate),
-            },
+            payload={"pending_requests": 0, "staging_count": 0, "error_rate": min(1.0, error_rate)},
         )
         hypo_result = await self.hypothalamus.process(hypo_signal)
         signals_count += 1
-        self._apply_gain(self.hypothalamus, activation_profile)
-        await self._emit("region_activation", "hypothalamus", self.hypothalamus.activation_level, "active")
-        await self._step(0.15)
+        _hypo_result_ref[0] = hypo_result  # Pass to background task
 
-        brainstem_signal = Signal(
-            type=SignalType.RESOURCE_STATUS,
-            source="pipeline",
-            payload={"pending_requests": 0},
-        )
-        await self.brainstem_region.process(brainstem_signal)
-        signals_count += 1
-        self._apply_gain(self.brainstem_region, activation_profile)
-        await self._emit("region_activation", "brainstem", self.brainstem_region.activation_level, "active")
-        await self._step(0.15)
+        self.neuro_ctrl.on_system_state(pending_requests=0, error_rate=min(1.0, error_rate))
 
-        self.neuro_ctrl.on_system_state(
-            pending_requests=0, error_rate=min(1.0, error_rate),
-        )
-        await self._emit("neuromodulator_update", **self.neuromodulators.snapshot())
-
-        # ══════════════════════════════════════════════════════════════
-        # Phase 5: Consolidation (Zielinski 2018)
-        # Threshold=5: consolidate after sufficient memories accumulate
-        # to avoid excessive writes. Both neuroscience + narrative layers.
-        # ══════════════════════════════════════════════════════════════
-
-        staging_count = await self.memory.staging.count_unconsolidated()
-        should_consolidate = (
-            (hypo_result and hypo_result.type == SignalType.CONSOLIDATION_TRIGGER)
-            or await self.memory.consolidation.should_consolidate()
-        )
-        logger.info("Consolidation check: %d unconsolidated, should_consolidate=%s",
-                     staging_count, should_consolidate)
-
-        # CRITICAL: Snapshot staging memories BEFORE any consolidation
-        # marks them as consolidated. Both layers need the same memories.
-        try:
-            staging_snapshot = await self.memory.staging.get_unconsolidated()
-        except Exception:
-            staging_snapshot = []
-
-        if should_consolidate:
-            await self._emit("region_processing", "hippocampus", "phase_5", "Consolidation triggered — transferring memories")
-
-            # Layer 1: Neuroscience consolidation (hippocampus → episodic → semantic)
-            await self.memory.consolidate()
-
-        # Layer 2: Narrative consolidation — runs EVERY turn (not gated by threshold)
-        # USER.md, MEMORY.md, SOUL.md must stay current. Waiting for threshold=5
-        # leaves these files stale for the first 4 turns of every session.
-        if staging_snapshot:
-            try:
-                from brain_agent.memory.narrative_consolidation import narrative_consolidate
-                llm = getattr(self.pfc, 'llm_provider', None) or self._llm_provider
-                if not llm:
-                    logger.error(
-                        "Phase 5: NO LLM provider available for narrative consolidation. "
-                        "Both PFC.llm_provider and pipeline._llm_provider are None. "
-                        "Memory files will NOT be updated."
-                    )
-                logger.info("Narrative consolidation: %d memories, llm=%s",
-                            len(staging_snapshot), type(llm).__name__ if llm else "NONE")
-                success = await narrative_consolidate(
-                    staging_snapshot, llm,
-                    semantic_store=self.memory.semantic,
-                )
-                logger.info("Narrative consolidation result: %s", success)
-                if success:
-                    # Reload schemas so updated USER.md + SOUL.md are reflected immediately
-                    self.tpj.reload_schema()
-                    self.mpfc.reload_schema()
-                    logger.info("TPJ + mPFC schemas reloaded after narrative consolidation")
-                await self._emit("region_processing", "hippocampus", "phase_5",
-                    f"Narrative consolidation: updated MEMORY.md + USER.md from {len(staging_snapshot)} memories")
-            except Exception as e:
-                logger.warning("Narrative consolidation failed: %s", e)
-
-        # Layer 3: Dreaming — recall-based promotion (Diekelmann & Born 2010)
-        # Periodically scores frequently-recalled memories and promotes
-        # high-value candidates to MEMORY.md for long-term retention.
-        if self.dreaming.should_dream():
-            try:
-                from brain_agent.memory.narrative_consolidation import _read_file, _write_file
-                promotion_text = await self.dreaming.run_cycle()
-                if promotion_text:
-                    current_memory = _read_file("memory/MEMORY.md")
-                    _write_file("memory/MEMORY.md", current_memory.rstrip() + "\n\n" + promotion_text + "\n")
-                    logger.info("Dreaming: promoted memories appended to MEMORY.md")
-                    await self._emit("region_processing", "hippocampus", "phase_5",
-                        "Dreaming: promoted high-recall memories to MEMORY.md")
-            except Exception as e:
-                logger.warning("Dreaming cycle failed: %s", e)
-
-        # Neuromodulator decay: drift toward baseline
-        self.neuro_ctrl.decay()
-        await self._emit("neuromodulator_update", **self.neuromodulators.snapshot())
-
-        # Persist brain state to DB (McEwen 2007: allostatic load carries over)
-        try:
-            await self.save_brain_state()
-        except Exception:
-            pass  # Brain state save is best-effort
-
+        # ── Return response IMMEDIATELY ──
+        # Phase 4 (encoding), KG storage, Phase 5 (consolidation),
+        # dreaming, neuromodulator decay, and brain state persistence
+        # all proceed in background via asyncio.create_task above.
         result.network_mode = self.network_ctrl.current_mode.value
         result.signals_processed = signals_count
         return result
