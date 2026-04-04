@@ -100,6 +100,23 @@ export function useWebSocket(url: string) {
             ts: data.ts || Date.now(),
           })
           break
+        case 'broadcast': {
+          // PFC response arrives via WebSocket BEFORE HTTP response completes.
+          // Show it immediately in chat so the user doesn't wait for background tasks.
+          const msg = data.payload?.content
+          if (msg && typeof msg === 'string' && !msg.startsWith('tool_') && msg !== 'action_executed') {
+            const s = useBrainStore.getState()
+            // Only add if not a duplicate of the last brain message
+            const last = s.chatMessages[s.chatMessages.length - 1]
+            if (!last || last.role !== 'brain' || last.text !== msg) {
+              const steps = [...s.thinkingSteps]
+              s.addChatMessage({ role: 'brain', text: msg, thinkingSteps: steps.length > 0 ? steps : undefined, ts: Date.now() })
+              s.setLastResponse(msg)
+              s.setChatLoading(false)
+            }
+          }
+          break
+        }
       }
     }
 

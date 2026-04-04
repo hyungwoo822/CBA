@@ -248,9 +248,13 @@ export const useBrainStore = create<BrainState>((set) => ({
       const data = await res.json()
       const responseText = data.response || data.error || 'No response'
       useBrainStore.getState().setLastResponse(responseText)
-      // Attach accumulated thinking steps to the brain message for later review
-      const steps = [...useBrainStore.getState().thinkingSteps]
-      useBrainStore.getState().addChatMessage({ role: 'brain', text: responseText, thinkingSteps: steps.length > 0 ? steps : undefined, ts: Date.now() })
+      // Only add HTTP response if WebSocket broadcast didn't already add it
+      const msgs = useBrainStore.getState().chatMessages
+      const lastMsg = msgs[msgs.length - 1]
+      if (!lastMsg || lastMsg.role !== 'brain' || lastMsg.text !== responseText) {
+        const steps = [...useBrainStore.getState().thinkingSteps]
+        useBrainStore.getState().addChatMessage({ role: 'brain', text: responseText, thinkingSteps: steps.length > 0 ? steps : undefined, ts: Date.now() })
+      }
     } catch {
       useBrainStore.getState().setLastResponse('Connection error')
       useBrainStore.getState().addChatMessage({ role: 'brain', text: 'Connection error', ts: Date.now() })
