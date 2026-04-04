@@ -18,18 +18,25 @@ ENTITY_EXTRACTION_INSTRUCTION = (
     ' "knowledge": [["subject", "relation", "object", confidence, "CATEGORY"]]}\n'
     "</entities>\n\n"
     "TWO SEPARATE sections — this is critical:\n\n"
-    "about_user: Facts you now know ABOUT THE USER from this conversation.\n"
-    "  MUST have 'user' as subject or target. What did you learn about them?\n"
-    "  e.g., user explicitly said '내 이름은 현우야' →\n"
-    '    ["user", "name", "hyunwoo", 1.0, "IDENTITY"]\n'
-    "  e.g., user explicitly said '커피 좋아해' →\n"
-    '    ["user", "like", "coffee", 1.0, "PREFERENCE"]\n'
-    "  e.g., user said '밥 먹다가 체했어' (implies indigestion) →\n"
-    '    ["user", "experience", "indigestion", 0.8, "ATTRIBUTE"]\n'
-    "  e.g., user said '나 MBTI가 E야' (implies personality) →\n"
-    '    ["user", "identify_as", "extroverted", 0.8, "IDENTITY"]\n'
-    "  e.g., user seems to enjoy something (inferred from tone) →\n"
-    '    ["user", "enjoy", "spicy food", 0.5, "PREFERENCE"]\n\n'
+    "about_user: Facts RELATED TO THE USER from this conversation.\n"
+    "  Build a MULTI-ENTITY GRAPH — not just 'user → X' flat triples.\n"
+    "  Include the user as a node AND other entities connected to the user's life.\n"
+    "  e.g., user said '내 이름은 현우야' →\n"
+    '    ["user", "name", "hyungwoo", 1.0, "IDENTITY"]\n'
+    "  e.g., user said '할머니가 병원에 오셨어' →\n"
+    '    ["grandmother", "visit", "user", 1.0, "ACTION"],\n'
+    '    ["grandmother", "location", "hospital", 0.8, "SPATIAL"],\n'
+    '    ["user", "have", "grandmother", 1.0, "SOCIAL"]\n'
+    "  e.g., user said '커피 먹으면 도파민이 올라가' →\n"
+    '    ["user", "like", "coffee", 0.8, "PREFERENCE"],\n'
+    '    ["coffee", "increase", "dopamine", 0.9, "CAUSAL"]\n'
+    "  e.g., user said '119 전화했더니 기분 나빠' →\n"
+    '    ["user", "call", "119", 1.0, "ACTION"],\n'
+    '    ["119", "cause", "bad mood", 0.8, "CAUSAL"],\n'
+    '    ["user", "experience", "bad mood", 1.0, "EMOTION"]\n\n'
+    "  KEY RULE: Build graph structure that mirrors the user's world.\n"
+    "  People, places, objects, concepts in the user's life should be\n"
+    "  separate nodes with their OWN edges, not just 'user → X' flat links.\n\n"
     "knowledge: General concept-to-concept facts (NOT user-specific).\n"
     "  Your domain knowledge used in the response.\n"
     '  e.g., ["cigarette", "contain", "nicotine", 0.9, "CAUSAL"],\n'
@@ -39,14 +46,14 @@ ENTITY_EXTRACTION_INSTRUCTION = (
     "  e.g., '참깨라면'→'sesame ramen', '술'→'alcohol', '매워'→'spicy'\n"
     "- ALL relations in English verb infinitives: 'like', 'eat', 'contain', 'cause'\n"
     "- Confidence calibration (IMPORTANT — vary these, do NOT default to 0.9):\n"
-    "  1.0 = user explicitly stated (direct quote: '나는 커피를 좋아해')\n"
+    "  1.0 = user explicitly stated (direct quote)\n"
     "  0.8 = clearly implied by user's words (strong inference)\n"
     "  0.6 = reasonable inference from context\n"
     "  0.4 = weak guess / might be temporary\n"
-    "- category: PREFERENCE|ACTION|ATTRIBUTE|SOCIAL|CAUSAL|SPATIAL|TEMPORAL|IDENTITY|GENERAL\n"
+    "- category: PREFERENCE|ACTION|ATTRIBUTE|SOCIAL|CAUSAL|SPATIAL|TEMPORAL|IDENTITY|EMOTION|GENERAL\n"
     "- Handle typos: '안녀ㅇ'→'hello', '체해서'→'indigestion'\n"
     "- Use CONSISTENT entity names across turns: same concept = same English name\n"
-    "- EVERY user statement should produce at least one about_user relation."
+    "- EVERY user statement should produce at least 2-3 triples including multi-entity edges."
 )
 
 METACOGNITION_INSTRUCTION = """

@@ -358,13 +358,29 @@ class SemanticStore:
             for s, _r, t in user_rows:
                 user_nodes.update([s, t])
 
-            # Filter agent_knowledge: include only edges where at least one
-            # node fuzzy-matches a user node (contextual relevance)
+            # Combine agent_about_user (multi-entity) + agent_knowledge
+            # where at least one node overlaps with the user graph.
+            # agent_about_user now contains multi-entity triples (e.g.,
+            # grandmother→visit→user), not just user→X→Y flat links.
             agent_rows = list(agent_direct_rows)
             for s, r, t in agent_knowledge_rows:
                 if (self._fuzzy_node_match(s, user_nodes)
                         or self._fuzzy_node_match(t, user_nodes)):
                     agent_rows.append((s, r, t))
+
+            # Also include identity_facts as virtual edges (they store
+            # multi-entity facts like "grandmother visit user" as values)
+            try:
+                id_facts = await self.get_identity_facts("user_model")
+                for fact in id_facts:
+                    val = fact.get("value", "")
+                    parts = val.split(" ", 2)
+                    if len(parts) >= 3:
+                        agent_rows.append((parts[0], parts[1], parts[2]))
+                    elif len(parts) == 2:
+                        agent_rows.append(("user", parts[0], parts[1]))
+            except Exception:
+                pass
 
             agent_nodes: set[str] = set()
             for s, _r, t in agent_rows:

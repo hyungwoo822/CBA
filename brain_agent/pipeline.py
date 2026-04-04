@@ -111,8 +111,12 @@ class ProcessingPipeline:
         memory: MemoryManager,
         llm_provider: LLMProvider | None = None,
         emitter: DashboardEmitter | None = None,
+        tool_registry=None,
+        max_tool_iterations: int = 10,
     ):
         self.memory = memory
+        self.tool_registry = tool_registry
+        self.max_tool_iterations = max_tool_iterations
         self._llm_provider = llm_provider  # Keep direct reference for Phase 5 consolidation
         self.neuromodulators = Neuromodulators()
         self.network_ctrl = TripleNetworkController()
@@ -259,44 +263,46 @@ class ProcessingPipeline:
                 await fn(*args, **kwargs)
 
     async def _store_identity_facts_realtime(self, relations: list, source: str = "realtime") -> int:
-        """Store durable user facts as identity_facts immediately (not waiting for consolidation).
+        """Store durable user-related facts as identity_facts immediately.
 
-        Filters about_user triplets for durable categories (IDENTITY, PREFERENCE,
-        ATTRIBUTE, SOCIAL) and stores them as identity_facts so TPJ can access
-        them on the very next request.
+        Stores ALL relations that involve the user's world — not just
+        'user → X' triples, but also multi-entity edges like
+        'grandmother → visit → user' or 'coffee → increase → dopamine'.
+
+        This enables a richer agent user model that mirrors the user's
+        actual knowledge graph structure.
 
         Returns the number of facts stored.
         """
-        DURABLE_CATEGORIES = {"IDENTITY", "PREFERENCE", "ATTRIBUTE", "SOCIAL"}
+        DURABLE_CATEGORIES = {"IDENTITY", "PREFERENCE", "ATTRIBUTE", "SOCIAL",
+                              "ACTION", "EMOTION", "CAUSAL", "SPATIAL"}
         stored = 0
         for rel in relations:
             if len(rel) < 3:
                 continue
             subj, relation, obj = str(rel[0]).lower(), str(rel[1]), str(rel[2])
-            if subj != "user":
-                continue
             try:
                 conf = float(rel[3]) if len(rel) >= 4 else 0.7
             except (ValueError, TypeError):
                 conf = 0.7
             cat = str(rel[4]).upper() if len(rel) >= 5 else "GENERAL"
 
-            if cat not in DURABLE_CATEGORIES or conf < 0.7:
+            if cat not in DURABLE_CATEGORIES or conf < 0.6:
                 continue
 
-            # Generate semantic key based on category
-            if cat == "IDENTITY":
-                key = relation.replace(" ", "_").lower()   # "name", "age", "occupation"
-                value = obj
-            elif cat == "PREFERENCE":
-                key = f"preference:{obj.replace(' ', '_').lower()}"
-                value = f"{relation} {obj}"
-            elif cat == "ATTRIBUTE":
-                key = f"attribute:{obj.replace(' ', '_').lower()}"
-                value = f"{relation} {obj}"
-            else:  # SOCIAL
-                key = f"social:{obj.replace(' ', '_').lower()}"
-                value = f"{relation} {obj}"
+            # Generate semantic key — preserve multi-entity structure
+            if subj == "user":
+                # User-centric: user → relation → object
+                if cat == "IDENTITY":
+                    key = relation.replace(" ", "_").lower()
+                    value = obj
+                else:
+                    key = f"{cat.lower()}:{relation.replace(' ', '_')}:{obj.replace(' ', '_').lower()}"
+                    value = f"{relation} {obj}"
+            else:
+                # Multi-entity: subject → relation → object (e.g., grandmother → visit → user)
+                key = f"{cat.lower()}:{subj.replace(' ', '_')}:{relation.replace(' ', '_')}:{obj.replace(' ', '_').lower()}"
+                value = f"{subj} {relation} {obj}"
 
             try:
                 await self.memory.semantic.add_identity_fact(
@@ -319,10 +325,10 @@ class ProcessingPipeline:
         intent = comprehension.get("intent", "unknown")
         keywords = comprehension.get("keywords", [])
         prompt = (
-            "Extract facts about the user from their input. Focus on:\n"
-            "1. What the user reveals about themselves (habits, preferences, states, facts)\n"
-            "2. Concept-to-concept relations implied by what they said\n"
-            "3. Emotional/psychological states\n\n"
+            "Extract facts about the user from their input. Build a MULTI-ENTITY GRAPH:\n"
+            "1. User-centric facts (user as subject: habits, preferences, states)\n"
+            "2. User's world entities (people, places, objects connected to user's life)\n"
+            "3. Causal/relational chains between entities\n\n"
             f"User said: {user_input}\n"
             f"Detected intent: {intent}\n"
             f"Keywords: {', '.join(keywords)}\n\n"
@@ -331,21 +337,20 @@ class ProcessingPipeline:
             '"relations": [["subject", "relation", "object", confidence, "CATEGORY"]]}\n\n'
             "Rules:\n"
             "- ALL entities MUST be English lowercase nouns. NEVER use Korean/non-English.\n"
-            "  '참깨라면'→'sesame ramen', '술'→'alcohol', '도파민'→'dopamine',\n"
-            "  '매워'→'spicy', '커피'→'coffee', '대장 내시경'→'colonoscopy'\n"
             "- ALL relations MUST be English verb infinitives: 'like', 'eat', 'cause'\n"
-            "- Include BOTH user-facts AND concept-concept relations\n"
-            "- Confidence calibration (CRITICAL — do NOT default to 0.9):\n"
-            "  1.0 = explicit statement ('커피 좋아해' → user like coffee = 1.0)\n"
-            "  0.8 = clear implication ('체했어' → user experience indigestion = 0.8)\n"
-            "  0.6 = reasonable inference from context\n"
-            "  0.4 = weak guess or temporary state\n"
-            "- Handle typos: '안녀ㅇ'→'hello', '들어ㅣㅇㅆ어'→'contain'\n"
-            "- Example: user says '참깨라면 먹고 도파민이 솟아' →\n"
-            '  [["user","eat","sesame ramen",1.0,"ACTION"],'
-            '["user","experience","joy",0.8,"EMOTION"],'
-            '["sesame ramen","increase","dopamine",0.8,"CAUSAL"]]\n'
-            "- Return empty lists ONLY if truly nothing can be extracted."
+            "- Build GRAPH STRUCTURE: multiple entities with edges between them.\n"
+            "  NOT just 'user → X', but also 'X → relation → Y' edges.\n"
+            "- Example: '할머니가 병원 오셨어' →\n"
+            '  [["user","have","grandmother",1.0,"SOCIAL"],'
+            '["grandmother","visit","user",1.0,"ACTION"],'
+            '["grandmother","location","hospital",0.8,"SPATIAL"]]\n'
+            "- Example: '119 전화했는데 기분 나빠' →\n"
+            '  [["user","call","119",1.0,"ACTION"],'
+            '["119","cause","bad mood",0.8,"CAUSAL"],'
+            '["user","experience","bad mood",1.0,"EMOTION"]]\n'
+            "- Confidence: 1.0=explicit, 0.8=implied, 0.6=inferred, 0.4=guess\n"
+            "- category: PREFERENCE|ACTION|ATTRIBUTE|SOCIAL|CAUSAL|SPATIAL|TEMPORAL|IDENTITY|EMOTION\n"
+            "- Produce at least 2-3 triples per statement. Return empty ONLY if truly nothing."
         )
         try:
             response = await self.pfc.llm_provider.chat([
@@ -995,10 +1000,80 @@ class ProcessingPipeline:
                         await self._emit_region_io("cerebellum", cb_before, action_signal, "forward_model_prediction")
                         await self._step()
 
-                    # ── Execute
+                    # ── Execute (Tool Execution Loop)
                     action = action_signal.payload.get("action", {})
-                    result.actions_taken.append(action)
-                    result.response = action.get("args", {}).get("text", "Action executed")
+                    tool_name = action.get("tool", "respond")
+
+                    # Tool execution loop: iterate until "respond" or max iterations
+                    tool_iteration = 0
+                    while (
+                        tool_name != "respond"
+                        and self.tool_registry
+                        and self.tool_registry.has(tool_name)
+                        and tool_iteration < self.max_tool_iterations
+                    ):
+                        tool_iteration += 1
+                        tool_params = action.get("args", {})
+                        logger.info(
+                            "[Pipeline] Tool call %d/%d: %s(%s)",
+                            tool_iteration, self.max_tool_iterations, tool_name, list(tool_params.keys()),
+                        )
+                        await self._emit("broadcast", f"tool_executing:{tool_name}", "pipeline")
+
+                        # Execute tool via registry
+                        tool_result_str = await self.tool_registry.execute(tool_name, tool_params)
+                        result.actions_taken.append({
+                            **action,
+                            "result": tool_result_str[:500],
+                            "iteration": tool_iteration,
+                        })
+                        await self._emit("broadcast", f"tool_result:{tool_name}", "pipeline")
+
+                        # Feed tool result back to PFC for next decision
+                        tool_feedback = Signal(
+                            type=SignalType.TOOL_RESULT,
+                            source="tool_executor",
+                            payload={
+                                "tool": tool_name,
+                                "params": tool_params,
+                                "result": tool_result_str,
+                                "iteration": tool_iteration,
+                                "original_input": text,
+                                "previous_plan": plan_signal.payload if plan_signal else {},
+                            },
+                        )
+                        # PFC re-plans with tool result context
+                        plan_signal = await self.pfc.process(tool_feedback)
+                        signals_count += 1
+
+                        if not plan_signal or plan_signal.type != SignalType.PLAN:
+                            break
+
+                        # Basal Ganglia re-selects next action
+                        plan_signal.metadata["neuromodulators"] = self.neuromodulators.snapshot()
+                        action_signal = await self.basal_ganglia.process(plan_signal)
+                        signals_count += 1
+
+                        if not action_signal or action_signal.type != SignalType.ACTION_SELECTED:
+                            # No further action — extract response from plan
+                            for act in plan_signal.payload.get("actions", []):
+                                resp = act.get("args", {}).get("text")
+                                if resp:
+                                    result.response = resp
+                                    break
+                            break
+
+                        action = action_signal.payload.get("action", {})
+                        tool_name = action.get("tool", "respond")
+
+                    # Final: extract text response
+                    if tool_name == "respond" or not (self.tool_registry and self.tool_registry.has(tool_name)):
+                        result.response = action.get("args", {}).get("text", result.response or "Action executed")
+                        result.actions_taken.append(action)
+
+                    if tool_iteration > 0:
+                        logger.info("[Pipeline] Tool loop completed after %d iterations", tool_iteration)
+
                     await self._emit("broadcast", "action_executed", "pipeline")
 
                     # ── Cerebellum: evaluate executed action
