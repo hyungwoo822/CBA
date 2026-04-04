@@ -368,20 +368,6 @@ class SemanticStore:
                         or self._fuzzy_node_match(t, user_nodes)):
                     agent_rows.append((s, r, t))
 
-            # Also include identity_facts as virtual edges (they store
-            # multi-entity facts like "grandmother visit user" as values)
-            try:
-                id_facts = await self.get_identity_facts("user_model")
-                for fact in id_facts:
-                    val = fact.get("value", "")
-                    parts = val.split(" ", 2)
-                    if len(parts) >= 3:
-                        agent_rows.append((parts[0], parts[1], parts[2]))
-                    elif len(parts) == 2:
-                        agent_rows.append(("user", parts[0], parts[1]))
-            except Exception:
-                pass
-
             agent_nodes: set[str] = set()
             for s, _r, t in agent_rows:
                 agent_nodes.update([s, t])
