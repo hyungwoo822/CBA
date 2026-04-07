@@ -195,6 +195,57 @@ class MemoryManager:
             "user_model": user_facts,
         }
 
+    async def render_user_context(self) -> str:
+        """Render identity_facts(user_model) into a markdown user profile.
+
+        This is the single source of truth for user knowledge, replacing
+        the former USER.md + MEMORY.md dual-file approach.
+        """
+        facts = await self.semantic.get_identity_facts("user_model")
+        if not facts:
+            return ""
+
+        # Group facts by category prefix (e.g., "preference:X" → preferences)
+        categorized: dict[str, list[str]] = {}
+        uncategorized: list[str] = []
+
+        for f in facts:
+            key = f["key"]
+            value = f["value"]
+            if ":" in key:
+                prefix, detail = key.split(":", 1)
+                category = prefix.strip()
+                categorized.setdefault(category, []).append(f"- {detail.strip()}: {value}")
+            else:
+                uncategorized.append(f"- **{key}**: {value}")
+
+        parts = ["# User Profile (from identity_facts)"]
+        if uncategorized:
+            parts.append("\n".join(uncategorized))
+        for cat, items in sorted(categorized.items()):
+            parts.append(f"\n## {cat.title()}\n" + "\n".join(items))
+
+        return "\n".join(parts)
+
+    async def render_memory_context(self) -> str:
+        """Render identity_facts(user_model) as long-term memory facts.
+
+        Replaces MEMORY.md — structured facts about the user organized
+        for PFC context injection. High-confidence facts only.
+        """
+        facts = await self.semantic.get_identity_facts("user_model")
+        if not facts:
+            return ""
+
+        lines = ["# Long-term Memory"]
+        for f in facts:
+            conf = f.get("confidence", 1.0)
+            if conf < 0.5:
+                continue  # skip low-confidence facts
+            lines.append(f"- {f['key']}: {f['value']}")
+
+        return "\n".join(lines) if len(lines) > 1 else ""
+
     async def retrieve(
         self,
         query: str,

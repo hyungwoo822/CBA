@@ -39,16 +39,15 @@ _DATA_DIR = _PROJECT_ROOT / "data"
 class TemporoparietalJunction(BrainRegion):
     """Right-lateralised Theory of Mind region.
 
-    Maintains a user model through two complementary layers:
+    Maintains a user model through identity facts stored in the
+    knowledge graph (single source of truth).
 
-    1. **Schema** -- a markdown profile loaded from ``data/USER.md``
-       that captures high-level identity, preferences, and personality.
-    2. **Graph facts** -- structured ``(subject, predicate, object)``
-       triples injected at runtime from the semantic store's identity
-       facts table.
+    The :meth:`get_user_context` method renders identity facts into a
+    textual representation suitable for prompt injection.
 
-    The :meth:`get_user_context` method merges both layers into a
-    single textual representation suitable for prompt injection.
+    References:
+      - Frith & Frith (2006): The neural basis of mentalizing
+      - Saxe & Kanwisher (2003): TPJ in theory of mind
     """
 
     def __init__(self) -> None:
@@ -58,81 +57,75 @@ class TemporoparietalJunction(BrainRegion):
             lobe=Lobe.PARIETAL,
             hemisphere=Hemisphere.RIGHT,
         )
-        self._schema_text: str = self._load_schema()
+        self._identity_facts: list[dict] = []
         self._graph_facts: list[dict] = []
-
-    # ── Internal helpers ──────────────────────────────────────────────
-
-    @staticmethod
-    def _load_schema() -> str:
-        """Read the user profile markdown from ``data/USER.md``.
-
-        Returns an empty string if the file does not exist so the
-        region can still function without the template.
-        """
-        path = _DATA_DIR / "USER.md"
-        try:
-            return path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            # Auto-create default USER.md on first run
-            default = (
-                "# User Profile\n\n"
-                "## About\n"
-                "- Preferences and personality will be learned through conversation\n\n"
-                "## Communication Style\n"
-                "- To be discovered through interaction\n\n"
-                "## Interests\n"
-                "- To be discovered through interaction\n"
-            )
-            try:
-                _DATA_DIR.mkdir(parents=True, exist_ok=True)
-                path.write_text(default, encoding="utf-8")
-            except OSError:
-                pass
-            return default
 
     # ── Public API ────────────────────────────────────────────────────
 
     def reload_schema(self) -> None:
-        """Re-read USER.md from disk after consolidation updates it."""
-        self._schema_text = self._load_schema()
+        """No-op for backwards compatibility.
+
+        Identity facts are updated via update_from_identity_facts() at
+        runtime, not loaded from disk.
+        """
+        pass
 
     def get_user_model(self) -> dict:
-        """Return the raw dual-layer user model.
-
-        Returns:
-            dict with ``schema`` (str) and ``facts`` (list[dict]).
-        """
+        """Return the raw user model layers."""
         return {
-            "schema": self._schema_text,
-            "facts": list(self._graph_facts),
+            "identity_facts": list(self._identity_facts),
+            "graph_facts": list(self._graph_facts),
         }
+
+    def update_from_identity_facts(self, facts: list[dict]) -> None:
+        """Replace identity facts (from semantic_store.get_identity_facts).
+
+        Args:
+            facts: list of dicts with ``key``, ``value``, ``confidence``.
+        """
+        self._identity_facts = list(facts)
 
     def update_from_graph_facts(self, facts: list[dict]) -> None:
         """Replace the current graph-fact layer with *facts*.
 
         Called by the pipeline after loading identity facts from the
         semantic store.
-
-        Args:
-            facts: list of dicts, each expected to have at least
-                   ``subject``, ``predicate``, and ``object`` keys.
         """
         self._graph_facts = list(facts)
 
     def get_user_context(self) -> str:
-        """Merge schema and graph facts into a unified context string.
+        """Render identity facts into a unified context string.
 
         The result is intended for injection into PFC prompts so the
         agent can reason with an up-to-date model of the user.
         """
         parts: list[str] = []
 
-        if self._schema_text:
-            parts.append(self._schema_text.strip())
+        if self._identity_facts:
+            lines = ["# User Profile"]
+            categorized: dict[str, list[str]] = {}
+            uncategorized: list[str] = []
+
+            for f in self._identity_facts:
+                key = f.get("key", "")
+                value = f.get("value", "")
+                if ":" in key:
+                    prefix, detail = key.split(":", 1)
+                    categorized.setdefault(prefix.strip(), []).append(
+                        f"- {detail.strip()}: {value}"
+                    )
+                else:
+                    uncategorized.append(f"- **{key}**: {value}")
+
+            if uncategorized:
+                lines.extend(uncategorized)
+            for cat, items in sorted(categorized.items()):
+                lines.append(f"\n## {cat.title()}")
+                lines.extend(items)
+            parts.append("\n".join(lines))
 
         if self._graph_facts:
-            lines = ["## Knowledge-Graph Identity Facts"]
+            lines = ["## Relationship Graph"]
             for fact in self._graph_facts:
                 subj = fact.get("subject", "?")
                 pred = fact.get("predicate", "?")

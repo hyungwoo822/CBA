@@ -426,13 +426,15 @@ class DreamingEngine:
         )
         return result
 
-    async def run_cycle(self) -> str:
+    async def run_cycle(self) -> list[dict]:
         """Run one complete dreaming cycle.
 
-        Returns the promotion text appended to MEMORY.md (empty if nothing promoted).
+        Returns promoted candidates (list of dicts with 'entry', 'score', 'key').
+        Each entry has content_preview that can be stored as identity_facts.
         """
         candidates = self.rank_candidates()
         if not candidates:
             logger.debug("Dreaming: no candidates met promotion thresholds")
-            return ""
-        return self.apply_promotions(candidates)
+            return []
+        self.apply_promotions(candidates)
+        return candidates

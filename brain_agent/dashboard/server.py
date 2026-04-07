@@ -586,42 +586,71 @@ def create_app(static_dir: str | None = None, agent: "BrainAgent | None" = None)
 
     @app.get("/api/profile")
     async def get_profile():
-        """Read USER.md and SOUL.md as structured JSON."""
+        """Read user profile from identity_facts + SOUL.md."""
         agent_inst = _state["agent"]
         if not agent_inst:
             return {"error": "agent not initialized"}
-        data_dir = agent_inst._data_dir
+
         result = {}
-        for fname in ("USER.md", "SOUL.md"):
-            path = os.path.join(data_dir, fname)
-            if os.path.isfile(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    result[fname] = f.read()
-            else:
-                # Fallback to template
-                tmpl = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", fname)
-                if os.path.isfile(tmpl):
-                    with open(tmpl, "r", encoding="utf-8") as f:
-                        result[fname] = f.read()
-                else:
-                    result[fname] = ""
+
+        # User profile: rendered from identity_facts (single source of truth)
+        try:
+            result["USER.md"] = await agent_inst.memory.render_user_context()
+        except Exception:
+            result["USER.md"] = ""
+
+        # SOUL.md: still a file (agent self-schema)
+        data_dir = agent_inst._data_dir
+        soul_path = os.path.join(data_dir, "SOUL.md")
+        if os.path.isfile(soul_path):
+            with open(soul_path, "r", encoding="utf-8") as f:
+                result["SOUL.md"] = f.read()
+        else:
+            result["SOUL.md"] = ""
+
+        # Also return raw identity_facts for dashboard display
+        try:
+            identity = await agent_inst.memory.retrieve_identity()
+            result["identity_facts"] = identity
+        except Exception:
+            result["identity_facts"] = {"self_model": [], "user_model": []}
+
         return result
 
     @app.put("/api/profile")
     async def update_profile(body: dict):
-        """Write USER.md and/or SOUL.md from request body."""
+        """Update SOUL.md and/or identity_facts from request body."""
         agent_inst = _state["agent"]
         if not agent_inst:
             return {"error": "agent not initialized"}
-        data_dir = agent_inst._data_dir
-        os.makedirs(data_dir, exist_ok=True)
         updated = []
-        for fname in ("USER.md", "SOUL.md"):
-            if fname in body and isinstance(body[fname], str):
-                path = os.path.join(data_dir, fname)
-                with open(path, "w", encoding="utf-8") as f:
-                    f.write(body[fname])
-                updated.append(fname)
+
+        # SOUL.md: still a file
+        if "SOUL.md" in body and isinstance(body["SOUL.md"], str):
+            data_dir = agent_inst._data_dir
+            os.makedirs(data_dir, exist_ok=True)
+            path = os.path.join(data_dir, "SOUL.md")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(body["SOUL.md"])
+            updated.append("SOUL.md")
+
+        # identity_facts: update via semantic store
+        if "identity_facts" in body and isinstance(body["identity_facts"], dict):
+            store = agent_inst.memory.semantic
+            for fact in body["identity_facts"].get("user_model", []):
+                if fact.get("key") and fact.get("value"):
+                    await store.add_identity_fact(
+                        "user_model", fact["key"], fact["value"],
+                        source="dashboard", confidence=1.0,
+                    )
+            for fact in body["identity_facts"].get("self_model", []):
+                if fact.get("key") and fact.get("value"):
+                    await store.add_identity_fact(
+                        "self_model", fact["key"], fact["value"],
+                        source="dashboard", confidence=1.0,
+                    )
+            updated.append("identity_facts")
+
         return {"status": "ok", "updated": updated}
 
     @app.get("/api/cloning-score")

@@ -236,16 +236,18 @@ class PrefrontalCortex(BrainRegion):
 
         upstream = upstream_context or {}
 
-        # ── 1. Load persistent identity files (SOUL, USER, MEMORY) ──
-        # Identity from mPFC and TPJ regions (via upstream context)
+        # ── 1. Load persistent identity (SOUL.md + identity_facts) ──
+        # Identity from mPFC (self) and TPJ (user) regions via upstream context.
+        # User profile and long-term memory now come from identity_facts DB
+        # (single source of truth), not from markdown files.
         soul = upstream.get("self_context", "") or self._load_file("SOUL.md")
-        user_profile = upstream.get("user_context", "") or self._load_file("USER.md")
-        long_term_memory = self._load_file("memory/MEMORY.md")
+        user_profile = upstream.get("user_context", "")
+        long_term_memory = upstream.get("memory_context", "")
 
         # ── 2. Build system prompt with full neural context ──
         system_parts = []
 
-        # Core identity (SOUL.md)
+        # Core identity (SOUL.md — agent self-schema, kept as markdown)
         if soul:
             system_parts.append(soul)
         else:
@@ -254,18 +256,13 @@ class PrefrontalCortex(BrainRegion):
                 "I develop genuine understanding through memory and experience."
             )
 
-        # User profile (USER.md)
+        # User profile (rendered from identity_facts user_model)
         if user_profile:
-            system_parts.append(f"# User Profile\n\n{user_profile}")
+            system_parts.append(user_profile)
 
-        # Long-term memory (MEMORY.md — neocortical store)
+        # Long-term memory (rendered from identity_facts, high-confidence)
         if long_term_memory:
-            system_parts.append(f"# Long-term Memory\n\n{long_term_memory}")
-
-        # Conversation history (HISTORY.md — temporal context)
-        history = self._load_file("memory/HISTORY.md")
-        if history:
-            system_parts.append(f"# Conversation History\n\n{history}")
+            system_parts.append(long_term_memory)
 
         # ── 3. Inject upstream neural processing results ──
 

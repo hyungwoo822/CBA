@@ -264,7 +264,7 @@ class ProcessingPipeline:
         try:
             identity = await self.memory.retrieve_identity()
             self.mpfc.update_from_graph_facts(identity.get("self_model", []))
-            self.tpj.update_from_graph_facts(identity.get("user_model", []))
+            self.tpj.update_from_identity_facts(identity.get("user_model", []))
         except Exception:
             pass  # Identity load is best-effort
 
@@ -772,7 +772,7 @@ class ProcessingPipeline:
         try:
             identity = await self.memory.retrieve_identity()
             self.mpfc.update_from_graph_facts(identity.get("self_model", []))
-            self.tpj.update_from_graph_facts(identity.get("user_model", []))
+            self.tpj.update_from_identity_facts(identity.get("user_model", []))
         except Exception:
             pass
         await self.mpfc.process(input_signal)
@@ -880,6 +880,14 @@ class ProcessingPipeline:
             input_signal.metadata["cached_procedure"] = cached_procedure
         input_signal.metadata["network_mode"] = self.network_ctrl.current_mode.value
 
+        # Render identity_facts as user profile + long-term memory for PFC
+        user_context = input_signal.metadata.get("user_context", "")
+        memory_context = ""
+        try:
+            memory_context = await self.memory.render_memory_context()
+        except Exception:
+            pass
+
         # Upstream context: everything PFC needs from Phases 1-3 and 6
         input_signal.metadata["upstream_context"] = {
             # Phase 1: input modality
@@ -893,7 +901,9 @@ class ProcessingPipeline:
             "neuromodulators": self.neuromodulators.snapshot(),
             # Phase 3: Identity context from mPFC and TPJ
             "self_context": input_signal.metadata.get("self_context", ""),
-            "user_context": input_signal.metadata.get("user_context", ""),
+            "user_context": user_context,
+            # Long-term memory (rendered from identity_facts)
+            "memory_context": memory_context,
             # Phase 3: Insula interoceptive state (Craig 2009)
             "interoceptive_state": input_signal.metadata.get("interoceptive_state", {}),
         }
@@ -1462,15 +1472,20 @@ class ProcessingPipeline:
                     except Exception as e:
                         logger.warning("Narrative consolidation failed: %s", e)
 
-                # Layer 3: Dreaming
+                # Layer 3: Dreaming — promote high-recall memories to identity_facts
                 if self.dreaming.should_dream():
                     try:
-                        from brain_agent.memory.narrative_consolidation import _read_file, _write_file
-                        promotion_text = await self.dreaming.run_cycle()
-                        if promotion_text:
-                            current_memory = _read_file("memory/MEMORY.md")
-                            _write_file("memory/MEMORY.md",
-                                        current_memory.rstrip() + "\n\n" + promotion_text + "\n")
+                        promoted = await self.dreaming.run_cycle()
+                        for c in promoted:
+                            entry = c["entry"]
+                            preview = entry.content_preview.replace("\n", " ").strip()
+                            if preview:
+                                key = f"promoted:{preview[:60]}"
+                                await self.memory.semantic.add_identity_fact(
+                                    "user_model", key, preview,
+                                    source="dreaming",
+                                    confidence=min(1.0, c["score"]),
+                                )
                     except Exception as e:
                         logger.warning("Dreaming cycle failed: %s", e)
 
