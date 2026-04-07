@@ -12,6 +12,7 @@ import { BrainResponseBubble } from './components/BrainResponseBubble'
 import { RegionBubbles } from './components/RegionBubble'
 import { MemoryPanel } from './components/MemoryPanel'
 import { ProfileEditModal } from './components/ProfileEditModal'
+import { ChannelToggle } from './components/ChannelToggle'
 import { useWebSocket } from './hooks/useWebSocket'
 import { resetAllPositions } from './hooks/useDraggable'
 import { useBrainStore } from './stores/brainState'
@@ -221,7 +222,10 @@ function App() {
             </svg>
           </button>
         </div>
-        <EditableUserName />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <ChannelToggle />
+          <EditableUserName />
+        </div>
       </nav>
       <div className="brain-viewport">
         <Canvas camera={{ position: [0, 20, 80], fov: 50 }}>

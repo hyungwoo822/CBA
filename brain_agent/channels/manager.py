@@ -38,6 +38,7 @@ class ChannelManager:
         for env_var, module_path, class_name in _CHANNEL_REGISTRY:
             token = os.environ.get(env_var, "")
             if not token:
+                print(f"[channels] {env_var} not set, skipping {class_name}")
                 continue
             try:
                 mod = importlib.import_module(module_path)
@@ -46,9 +47,9 @@ class ChannelManager:
                 adapter._channel_mgr = self
                 await adapter.start()
                 self.register(adapter)
-                logger.info("[channels] %s started", adapter.name)
+                print(f"[channels] {adapter.name} started")
             except Exception as e:
-                logger.error("[channels] Failed to start %s: %s", class_name, e)
+                print(f"[channels] Failed to start {class_name}: {e}")
 
     async def stop_all(self) -> None:
         """Stop all active adapters."""
