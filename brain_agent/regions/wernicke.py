@@ -98,6 +98,18 @@ class WernickeArea(BrainRegion):
         self.emit_activation(0.5 + (0.3 if complexity != "simple" else 0.0))
         return signal
 
+    def inject(self, signal: Signal, comprehension: dict) -> Signal:
+        """Receive pre-computed comprehension from Cortical Integration.
+
+        In the 2-call architecture, comprehension is produced by the
+        unified cortical LLM call rather than a dedicated Wernicke call.
+        The region still sets activation_level for dashboard visualization.
+        """
+        signal.payload["comprehension"] = comprehension
+        complexity = comprehension.get("complexity", "simple")
+        self.emit_activation(0.5 + (0.3 if complexity != "simple" else 0.0))
+        return signal
+
     # ── LLM path (Hickok & Poeppel 2007: ventral stream semantic analysis) ──
 
     async def _comprehend_with_llm(self, text: str) -> dict:
