@@ -28,8 +28,6 @@ def main():
         if len(sys.argv) > 2 and sys.argv[2] == "--port" and len(sys.argv) > 3:
             port = int(sys.argv[3])
         run_dashboard(port)
-    elif command == "serve":
-        asyncio.run(serve_all())
     elif command in ("--help", "-h"):
         print_help()
     else:
@@ -43,8 +41,7 @@ def print_help():
 
 Usage:
   brain-agent run                  Start the agent (interactive)
-  brain-agent serve                Start all enabled channels (dashboard + telegram + discord)
-  brain-agent dashboard [--port N] Start the dashboard server (default port 3000)
+  brain-agent dashboard [--port N] Start dashboard + all channels (default port 3000)
   brain-agent memory stats         Show memory statistics
   brain-agent version              Show version
   brain-agent --help               Show this help
@@ -91,58 +88,6 @@ async def show_memory_stats():
         print("Memory Statistics:")
         for key, value in stats.items():
             print(f"  {key}: {value}")
-
-
-async def serve_all():
-    """Start dashboard + all enabled channel adapters concurrently."""
-    import os
-    import signal
-    from dotenv import load_dotenv
-    from brain_agent.agent import BrainAgent
-
-    load_dotenv()
-    model = os.environ.get("BRAIN_AGENT_MODEL", None)
-    adapters = []
-
-    async with BrainAgent(use_mock_embeddings=True, model=model) as agent:
-        # Telegram
-        tg_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-        if tg_token:
-            from brain_agent.channels.telegram_adapter import TelegramAdapter
-            tg = TelegramAdapter(agent, token=tg_token)
-            await tg.start()
-            adapters.append(tg)
-            print("[serve] Telegram bot started")
-
-        # Discord
-        dc_token = os.environ.get("DISCORD_BOT_TOKEN", "")
-        if dc_token:
-            from brain_agent.channels.discord_adapter import DiscordAdapter
-            dc = DiscordAdapter(agent, token=dc_token)
-            await dc.start()
-            adapters.append(dc)
-            print("[serve] Discord bot started")
-
-        if not adapters:
-            print("[serve] No channel tokens found. Set TELEGRAM_BOT_TOKEN or DISCORD_BOT_TOKEN in .env")
-            return
-
-        print(f"[serve] {len(adapters)} channel(s) active. Ctrl+C to stop.")
-
-        # Wait until interrupted
-        stop_event = asyncio.Event()
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, stop_event.set)
-
-        await stop_event.wait()
-
-        # Graceful shutdown
-        print("\n[serve] Shutting down...")
-        for adapter in adapters:
-            await adapter.stop()
-
-    print("[serve] Done.")
 
 
 def run_dashboard(port: int = 3000):
