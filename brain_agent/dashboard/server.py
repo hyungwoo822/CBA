@@ -188,8 +188,23 @@ def create_app(static_dir: str | None = None, agent: "BrainAgent | None" = None)
             print(f"[brain-agent] LLM provider: {_state['agent']._llm_provider}")
         # Wire emitter into pipeline
         _state["agent"].pipeline._emitter = _emitter
+
+        # Start channel adapters with shared agent
+        from brain_agent.channels.manager import ChannelManager
+        channel_mgr = ChannelManager()
+        await channel_mgr.start_all(_state["agent"])
+        _state["channels"] = channel_mgr
+        active = channel_mgr.status()
+        if active:
+            print(f"[brain-agent] Channels: {', '.join(c['name'] for c in active)}")
+        else:
+            print("[brain-agent] No channel tokens configured")
+
         yield
-        # Shutdown
+
+        # Shutdown channels first, then agent
+        if _state.get("channels"):
+            await _state["channels"].stop_all()
         if _state["agent"] and _state["owns_agent"]:
             await _state["agent"].close()
 
@@ -248,6 +263,24 @@ def create_app(static_dir: str | None = None, agent: "BrainAgent | None" = None)
             "clients": event_bus.client_count,
             "events_buffered": len(event_bus._buffer),
         }
+
+    @app.get("/api/channels")
+    async def get_channels():
+        """List all connected channels with broadcast status."""
+        channel_mgr = _state.get("channels")
+        if not channel_mgr:
+            return []
+        return channel_mgr.status()
+
+    @app.put("/api/channels/{name}/broadcast")
+    async def set_channel_broadcast(name: str, body: dict):
+        """Toggle broadcast for a channel. Body: {"enabled": true/false}"""
+        channel_mgr = _state.get("channels")
+        if not channel_mgr:
+            return {"error": "no channel manager"}
+        enabled = body.get("enabled", True)
+        channel_mgr.set_broadcast(name, enabled)
+        return {"status": "ok", "channel": name, "broadcast": enabled}
 
     @app.get("/api/events/recent")
     async def get_recent_events(n: int = 50):
@@ -320,6 +353,11 @@ def create_app(static_dir: str | None = None, agent: "BrainAgent | None" = None)
 
         result = await agent_inst.process(full_text, image=image_bytes, audio=audio_bytes)
         pipeline = agent_inst.pipeline
+
+        # Broadcast response to enabled channels
+        channel_mgr = _state.get("channels")
+        if channel_mgr:
+            await channel_mgr.broadcast_response(result.response)
 
         await _emitter.region_activation("hippocampus", 0.7, "active")
         stats = await agent_inst.memory.stats()
