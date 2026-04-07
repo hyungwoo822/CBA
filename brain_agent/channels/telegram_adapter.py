@@ -71,9 +71,22 @@ class TelegramAdapter(ChannelAdapter):
             await self._app.stop()
             await self._app.shutdown()
 
+    async def send_to_chat(self, text: str, chat_id: int | str | None = None) -> None:
+        """Send a message to a Telegram chat (used by broadcast)."""
+        if not self._app or not chat_id:
+            return
+        for chunk in split_message(text, TELEGRAM_MAX_MESSAGE_LENGTH):
+            await self._app.bot.send_message(chat_id=chat_id, text=chunk)
+
     # ── Handlers ─────────────────────────────────────────────
 
+    def _track_chat(self, update) -> None:
+        """Report last active chat_id to ChannelManager."""
+        if self._channel_mgr and update.message:
+            self._channel_mgr.set_last_chat_id("telegram", update.message.chat_id)
+
     async def _cmd_start(self, update, context) -> None:
+        self._track_chat(update)
         await update.message.reply_text(
             "안녕하세요! 메시지를 보내주세요."
         )
@@ -82,10 +95,12 @@ class TelegramAdapter(ChannelAdapter):
         text = update.message.text or ""
         if not text.strip():
             return
+        self._track_chat(update)
         response = await self.handle_message(text=text)
         await self._send_reply(update, response)
 
     async def _on_photo(self, update, context) -> None:
+        self._track_chat(update)
         caption = update.message.caption or ""
         photo = update.message.photo[-1]  # highest resolution
         file = await context.bot.get_file(photo.file_id)
@@ -94,6 +109,7 @@ class TelegramAdapter(ChannelAdapter):
         await self._send_reply(update, response)
 
     async def _on_audio(self, update, context) -> None:
+        self._track_chat(update)
         voice = update.message.voice or update.message.audio
         if not voice:
             return

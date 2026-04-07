@@ -7,7 +7,6 @@ The bot responds to DMs and @mentions in guild channels.
 """
 from __future__ import annotations
 
-import io
 import logging
 from typing import TYPE_CHECKING
 
@@ -30,6 +29,7 @@ class DiscordAdapter(ChannelAdapter):
         super().__init__(agent)
         self._token = token
         self._client = None
+        self._last_discord_channel = None  # discord.TextChannel for broadcast
 
     async def start(self) -> None:
         try:
@@ -50,24 +50,25 @@ class DiscordAdapter(ChannelAdapter):
             logger.info("[discord] Bot ready as %s", self._client.user)
 
         @self._client.event
-        async def on_message(message: discord.Message):
-            # Ignore own messages
+        async def on_message(message):
             if message.author == self._client.user:
                 return
 
-            # Respond to DMs or @mentions
             is_dm = message.guild is None
             is_mentioned = self._client.user in message.mentions if message.guild else False
 
             if not is_dm and not is_mentioned:
                 return
 
-            # Strip the mention from text
+            # Track last active channel
+            adapter._last_discord_channel = message.channel
+            if adapter._channel_mgr:
+                adapter._channel_mgr.set_last_chat_id("discord", message.channel.id)
+
             text = message.content
             if is_mentioned and self._client.user:
                 text = text.replace(f"<@{self._client.user.id}>", "").strip()
 
-            # Handle attachments
             image_bytes = None
             audio_bytes = None
             for att in message.attachments:
@@ -90,10 +91,8 @@ class DiscordAdapter(ChannelAdapter):
             for chunk in split_message(response, DISCORD_MAX_MESSAGE_LENGTH):
                 await message.channel.send(chunk)
 
-        # Run the bot (non-blocking start)
         logger.info("[discord] Bot starting")
         await self._client.login(self._token)
-        # start() is blocking, so we use a task
         import asyncio
         self._task = asyncio.create_task(self._client.connect())
 
@@ -101,3 +100,17 @@ class DiscordAdapter(ChannelAdapter):
         if self._client and not self._client.is_closed():
             logger.info("[discord] Shutting down bot")
             await self._client.close()
+
+    async def send_to_chat(self, text: str, chat_id: int | str | None = None) -> None:
+        """Send a message to a Discord channel (used by broadcast)."""
+        if not self._client:
+            return
+        channel = None
+        if chat_id:
+            channel = self._client.get_channel(int(chat_id))
+        if not channel:
+            channel = self._last_discord_channel
+        if not channel:
+            return
+        for chunk in split_message(text, DISCORD_MAX_MESSAGE_LENGTH):
+            await channel.send(chunk)
