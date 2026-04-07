@@ -8,7 +8,7 @@ from brain_agent.middleware.base import Middleware, MiddlewareChain
 
 logger = logging.getLogger(__name__)
 
-# Global mapping: name → middleware class
+# Global mapping: name -> middleware class
 _MIDDLEWARE_CLASSES: dict[str, Type[Middleware]] = {}
 
 
@@ -17,10 +17,22 @@ def register_middleware(name: str, cls: Type[Middleware]) -> None:
 
 
 def _auto_register() -> None:
-    """Import built-in middlewares so they self-register."""
-    from brain_agent.middleware.pipeline.logging import LoggingMiddleware  # noqa: F401
-    from brain_agent.middleware.llm.token_counter import TokenCounterMiddleware  # noqa: F401
-    from brain_agent.middleware.tool.permission import PermissionMiddleware  # noqa: F401
+    """Import built-in middlewares so they self-register.
+
+    Anatomical mapping:
+      meninges  — pipeline-level protective membranes
+      myelin    — LLM-level signal insulation
+      barrier   — tool-level selective permeability
+    """
+    # Meninges (pipeline-level)
+    from brain_agent.middleware.meninges.dura_mater import DuraMater  # noqa: F401
+    from brain_agent.middleware.meninges.arachnoid_tracer import ArachnoidTracer  # noqa: F401
+    # Myelin (LLM-level)
+    from brain_agent.middleware.myelin.sheath import MyelinSheath  # noqa: F401
+    # Barrier (tool-level)
+    from brain_agent.middleware.barrier.blood_brain_barrier import BloodBrainBarrier  # noqa: F401
+    from brain_agent.middleware.barrier.synaptic_timeout import SynapticTimeout  # noqa: F401
+    from brain_agent.middleware.barrier.microglial_defense import MicroglialDefense  # noqa: F401
 
 
 class MiddlewareRegistry:

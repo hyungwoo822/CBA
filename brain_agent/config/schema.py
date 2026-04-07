@@ -87,9 +87,9 @@ class MiddlewareLayerConfig(BaseModel):
 
 
 class MiddlewareConfig(BaseModel):
-    pipeline: MiddlewareLayerConfig = Field(default_factory=MiddlewareLayerConfig)
-    llm: MiddlewareLayerConfig = Field(default_factory=MiddlewareLayerConfig)
-    tool: MiddlewareLayerConfig = Field(default_factory=MiddlewareLayerConfig)
+    meninges: MiddlewareLayerConfig = Field(default_factory=MiddlewareLayerConfig)
+    myelin: MiddlewareLayerConfig = Field(default_factory=MiddlewareLayerConfig)
+    barrier: MiddlewareLayerConfig = Field(default_factory=MiddlewareLayerConfig)
 
 
 class TelegramConfig(BaseModel):

@@ -1,4 +1,10 @@
-"""Middleware system — 3-layer onion model (pipeline / llm / tool)."""
+"""Neural sheath system — 3-layer protective architecture.
+
+Anatomical layers:
+  meninges  — pipeline-level (DuraMater, ArachnoidTracer)
+  myelin    — LLM-level (MyelinSheath)
+  barrier   — tool-level (BloodBrainBarrier, SynapticTimeout, MicroglialDefense)
+"""
 from brain_agent.middleware.base import (
     Middleware,
     MiddlewareContext,

@@ -11,10 +11,12 @@ from brain_agent.core.embeddings import EmbeddingService
 from brain_agent.core.session import SessionManager
 from brain_agent.memory.manager import MemoryManager
 from brain_agent.middleware import MiddlewareRegistry
+from brain_agent.middleware.base import MiddlewareContext
 from brain_agent.mcp.registry import MCPRegistry
 from brain_agent.pipeline import ProcessingPipeline, PipelineResult
 from brain_agent.providers.base import LLMProvider
 from brain_agent.providers.litellm_provider import LiteLLMProvider
+from brain_agent.providers.myelinated import MyelinatedProvider
 from brain_agent.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -93,17 +95,32 @@ class BrainAgent:
         # MCP — will be initialized async in initialize()
         self._mcp_registry = MCPRegistry()
 
-        # Middleware — build 3-layer chains from config
+        # ── Neural sheath system (3-layer middleware) ──
+        # Anatomical mapping:
+        #   meninges — pipeline-level protective membranes (DuraMater, ArachnoidTracer)
+        #   myelin   — LLM-level signal insulation (MyelinSheath)
+        #   barrier  — tool-level selective permeability (BBB, SynapticTimeout, Microglial)
         mw_registry = MiddlewareRegistry()
-        self._pipeline_mw = mw_registry.build_chain(self.config.middleware.pipeline.enabled)
-        self._llm_mw = mw_registry.build_chain(self.config.middleware.llm.enabled)
-        self._tool_mw = mw_registry.build_chain(self.config.middleware.tool.enabled)
+        self._meninges_mw = mw_registry.build_chain(self.config.middleware.meninges.enabled)
+        self._myelin_mw = mw_registry.build_chain(self.config.middleware.myelin.enabled)
+        self._barrier_mw = mw_registry.build_chain(self.config.middleware.barrier.enabled)
+
+        # Myelinate the LLM provider — wraps every chat() call with
+        # myelin middleware (token counting, etc.) transparently.
+        # No brain region needs to know about the sheath.
+        if self._llm_provider and self.config.middleware.myelin.enabled:
+            self._llm_provider = MyelinatedProvider(
+                inner=self._llm_provider,
+                myelin=self._myelin_mw,
+            )
 
         # Pipeline — receives MemoryManager so memory is integrated into
-        # every processing stage, not bolted on afterward
+        # every processing stage, not bolted on afterward.
+        # Also receives the barrier middleware chain for tool-level gating.
         self.pipeline = ProcessingPipeline(
             memory=self.memory,
             llm_provider=self._llm_provider,
+            barrier_mw=self._barrier_mw,
         )
         self._initialized = False
 
@@ -133,7 +150,12 @@ class BrainAgent:
         self._initialized = False
 
     async def process(self, text: str, image: bytes | None = None, audio: bytes | None = None) -> PipelineResult:
-        """Process a user request through the full brain pipeline."""
+        """Process a user request through the full brain pipeline.
+
+        The meninges middleware wraps this entire cycle — like the dura
+        mater enveloping the brain, it monitors input/output and timing
+        at the outermost layer.
+        """
         if not self._initialized:
             await self.initialize()
 
@@ -154,10 +176,25 @@ class BrainAgent:
         )
         self.memory.set_context(interaction_id, session_id)
 
-        # Run pipeline — memory encoding & retrieval happen inside
-        result = await self.pipeline.process_request(text, image=image, audio=audio)
+        # ── Meninges wrap: pipeline-level protective membrane ──
+        context = MiddlewareContext(data={
+            "user_input": text,
+            "image": image,
+            "audio": audio,
+        })
 
-        return result
+        async def _pipeline_core(ctx: MiddlewareContext) -> MiddlewareContext:
+            result = await self.pipeline.process_request(
+                ctx["user_input"],
+                image=ctx.get("image"),
+                audio=ctx.get("audio"),
+            )
+            ctx["result"] = result
+            return ctx
+
+        context = await self._meninges_mw.execute(context, _pipeline_core)
+
+        return context["result"]
 
     async def __aenter__(self):
         await self.initialize()

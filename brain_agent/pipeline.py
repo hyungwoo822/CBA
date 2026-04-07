@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from brain_agent.providers.base import LLMProvider
     from brain_agent.dashboard.emitter import DashboardEmitter
 
+from brain_agent.middleware.base import MiddlewareContext
+
 from brain_agent.core.signals import Signal, SignalType, EmotionalTag
 from brain_agent.core.activation_profile import compute_activation_profile, should_full_process
 from brain_agent.core.neuromodulators import Neuromodulators
@@ -113,11 +115,16 @@ class ProcessingPipeline:
         emitter: DashboardEmitter | None = None,
         tool_registry=None,
         max_tool_iterations: int = 10,
+        barrier_mw=None,
     ):
         self.memory = memory
         self.tool_registry = tool_registry
         self.max_tool_iterations = max_tool_iterations
         self._llm_provider = llm_provider  # Keep direct reference for Phase 5 consolidation
+        # Barrier middleware (BBB + SynapticTimeout + MicroglialDefense)
+        # gates every tool execution like the blood-brain barrier
+        # selectively permits substances crossing the neural boundary.
+        self._barrier_mw = barrier_mw
         self.neuromodulators = Neuromodulators()
         self.network_ctrl = TripleNetworkController()
         self.router = ThalamicRouter(
@@ -188,6 +195,32 @@ class ProcessingPipeline:
             self.corpus_callosum, self.broca, self.motor_cortex,
             self.hypothalamus, self.vta, self.brainstem_region,
         ]
+
+    async def _execute_through_barrier(
+        self, tool_name: str, tool_params: dict,
+    ) -> str:
+        """Execute a tool through the barrier middleware chain.
+
+        The blood-brain barrier selectively permits substances; the
+        synaptic timeout enforces temporal limits; microglial defense
+        scans for pathogenic input.  If no barrier is configured the
+        tool executes directly — an empty chain is transparent.
+        """
+        if self._barrier_mw:
+            ctx = MiddlewareContext(data={
+                "tool_name": tool_name,
+                "params": tool_params,
+            })
+
+            async def _core(c: MiddlewareContext) -> MiddlewareContext:
+                c["result"] = await self.tool_registry.execute(
+                    c["tool_name"], c["params"],
+                )
+                return c
+
+            ctx = await self._barrier_mw.execute(ctx, _core)
+            return ctx.get("result", "")
+        return await self.tool_registry.execute(tool_name, tool_params)
 
     async def restore_brain_state(self) -> None:
         """Load persisted neuromodulator and activation state from DB.
@@ -1041,8 +1074,8 @@ class ProcessingPipeline:
                         )
                         await self._emit("broadcast", f"tool_executing:{tool_name}", "pipeline")
 
-                        # Execute tool via registry
-                        tool_result_str = await self.tool_registry.execute(tool_name, tool_params)
+                        # Execute tool via barrier middleware (BBB gating)
+                        tool_result_str = await self._execute_through_barrier(tool_name, tool_params)
                         result.actions_taken.append({
                             **action,
                             "result": tool_result_str[:500],
