@@ -89,6 +89,25 @@ class BrocaArea(BrainRegion):
         self.emit_activation(0.7 if self.llm_provider else 0.6)
         return signal
 
+    def inject_refined(self, signal: Signal, refined_text: str | None) -> None:
+        """Receive refined response from Post-Synaptic Consolidation."""
+        if refined_text is None:
+            self.emit_activation(0.3)
+            return
+
+        actions = signal.payload.get("actions", [])
+        for action in actions:
+            args = action.get("args", {})
+            if "text" in args:
+                args["text"] = self._clean_text(refined_text)
+                break
+
+        response_text = signal.payload.get("response_text")
+        if response_text is not None:
+            signal.payload["response_text"] = self._clean_text(refined_text)
+
+        self.emit_activation(0.7)
+
     # ── LLM path (Levelt 1989: formulation stage) ─────────────────────
 
     async def _produce_with_llm(self, signal: Signal) -> None:
