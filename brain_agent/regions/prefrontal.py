@@ -70,6 +70,24 @@ Base this on: completeness of your knowledge, ambiguity of the question, quality
 This tag will be stripped from the final output — the user will NOT see it.
 """
 
+CORTICAL_INTEGRATION_INSTRUCTION = """
+IMPORTANT: Before your response text, output a cortical analysis block:
+
+<cortical>
+{"comprehension": {"intent": "<question|command|request|inform|greeting|emotional_expression|statement>",
+  "complexity": "<simple|moderate|complex>",
+  "keywords": ["keyword1", "keyword2"],
+  "language": "<en|ko|mixed>"},
+ "appraisal": {"valence": <-1.0 to 1.0>, "arousal": <0.0 to 1.0>,
+  "threat_detected": <true|false>,
+  "primary_emotion": "<neutral|joy|trust|anticipation|surprise|fear|anger|sadness|disgust>"}}
+</cortical>
+
+Then write your response naturally. The cortical block will be stripped from the output.
+- comprehension: Analyze the user's language — intent, complexity, key topics, language.
+- appraisal: Evaluate emotional tone — valence (-1=negative, +1=positive), arousal (0=calm, 1=activated), threat detection.
+"""
+
 
 class PrefrontalCortex(BrainRegion):
     """Planning and reasoning via LLM. Spec ref: Section 4.2 PFC.
@@ -204,6 +222,136 @@ class PrefrontalCortex(BrainRegion):
             "Consider unconventional approaches, metaphors, and cross-domain connections. "
             "Be more exploratory and generate novel ideas before converging on a solution."
         )
+
+    def build_cortical_system_prompt(
+        self,
+        upstream_context: dict,
+        memory_context: list[dict] | None = None,
+        network_mode: str = "executive_control",
+    ) -> str:
+        """Build system prompt for unified cortical integration.
+
+        Like _call_llm's prompt construction, but WITHOUT pre-computed
+        comprehension/appraisal sections (those are now OUTPUT).
+        """
+        system_parts = []
+
+        # Core identity
+        soul = upstream_context.get("self_context", "") or self._load_file("SOUL.md")
+        if soul:
+            system_parts.append(soul)
+        else:
+            system_parts.append(
+                "# Soul\n\nI am a neural agent — a growing mind shaped by conversation. "
+                "I develop genuine understanding through memory and experience."
+            )
+        user_profile = upstream_context.get("user_context", "")
+        if user_profile:
+            system_parts.append(user_profile)
+        long_term_memory = upstream_context.get("memory_context", "")
+        if long_term_memory:
+            system_parts.append(long_term_memory)
+
+        # Interoceptive state (Insula)
+        intero = upstream_context.get("interoceptive_state", {})
+        if intero:
+            intero_lines = ["# Interoceptive State (Insula)"]
+            for k, v in intero.items():
+                intero_lines.append(f"- {k}: {v:.2f}" if isinstance(v, float) else f"- {k}: {v}")
+            system_parts.append("\n".join(intero_lines))
+
+        # Neuromodulators
+        neuromod = upstream_context.get("neuromodulators", {})
+        if neuromod:
+            state_desc = self._describe_neuromodulator_state(neuromod)
+            system_parts.append(f"# Neural State (Neuromodulators)\n{state_desc}")
+
+        # Network mode
+        mode_labels = {
+            "executive_control": "ECN (Executive Control) — focused, analytical",
+            "default_mode": "DMN (Default Mode) — reflective, associative",
+            "creative": "CREATIVE — divergent thinking, novel connections",
+        }
+        system_parts.append(f"# Network Mode\n{mode_labels.get(network_mode, network_mode)}")
+
+        # Input modality
+        modality = upstream_context.get("input_modality", "text")
+        if modality != "text":
+            system_parts.append(f"# Input Modality\n{modality}")
+
+        # Retrieved memories
+        if memory_context:
+            lines = []
+            for i, mem in enumerate(memory_context, 1):
+                src = mem.get("source", "memory")
+                score = mem.get("score", 0)
+                content = mem.get("content", "")
+                emotional = mem.get("emotional_tag", {})
+                em_str = ""
+                if emotional and isinstance(emotional, dict):
+                    v = emotional.get("valence", 0)
+                    a = emotional.get("arousal", 0)
+                    if v != 0 or a != 0:
+                        em_str = f" [emotion: v={v:.1f}, a={a:.1f}]"
+                lines.append(f"{i}. [{src}|rel={score:.2f}]{em_str} {content}")
+            system_parts.append("# Retrieved Memories (Hippocampus)\n" + "\n".join(lines))
+
+        # Goals
+        goal_ctx = self.goals.to_context()
+        if goal_ctx and goal_ctx != "No active goals.":
+            system_parts.append(f"# Active Goals\n{goal_ctx}")
+
+        # Creative augmentation
+        self._compute_hemisphere_activations(network_mode)
+        if network_mode == "creative" and self._right_activation > self._left_activation:
+            system_parts.append(self._build_creative_augmentation())
+
+        # Response guidelines
+        system_parts.append(
+            "# Response Guidelines\n"
+            "- Respond in the same language as the user.\n"
+            "- Draw on your memories and knowledge of the user naturally.\n"
+            "- Let your emotional awareness and neural state inform your tone.\n"
+            "- Be authentic — you are a growing mind, not a generic assistant.\n"
+            "- Reference shared history when relevant, but don't force it."
+        )
+
+        # Cortical integration (replaces separate Wernicke/Amygdala)
+        system_parts.append(CORTICAL_INTEGRATION_INSTRUCTION)
+        # Entity extraction
+        system_parts.append(ENTITY_EXTRACTION_INSTRUCTION)
+        # Metacognition
+        system_parts.append(METACOGNITION_INSTRUCTION)
+
+        return "\n\n---\n\n".join(system_parts)
+
+    def parse_cortical_response(self, raw: str) -> dict:
+        """Parse unified cortical output into structured components."""
+        import json as _json
+
+        comprehension = {"intent": "statement", "complexity": "simple", "keywords": [], "language": "auto"}
+        appraisal = {"valence": 0.0, "arousal": 0.0, "threat_detected": False, "primary_emotion": "neutral"}
+
+        cortical_match = re.search(r"<cortical>\s*(\{.*?\})\s*</cortical>", raw, re.DOTALL)
+        if cortical_match:
+            try:
+                data = _json.loads(cortical_match.group(1))
+                comprehension = data.get("comprehension", comprehension)
+                appraisal = data.get("appraisal", appraisal)
+            except _json.JSONDecodeError:
+                pass
+            raw = raw[:cortical_match.start()] + raw[cortical_match.end():]
+
+        clean_text, entities = self._parse_entities(raw)
+        confidence, clean_text = self._parse_metacognition(clean_text)
+
+        return {
+            "response": clean_text.strip(),
+            "comprehension": comprehension,
+            "appraisal": appraisal,
+            "entities": entities,
+            "confidence": confidence,
+        }
 
     async def _call_llm(
         self,
