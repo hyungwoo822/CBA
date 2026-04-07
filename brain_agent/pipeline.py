@@ -401,7 +401,7 @@ class ProcessingPipeline:
         gain = profile.get(region.name, 0.5)
         region.emit_activation(region.activation_level * gain)
 
-    async def _step(self, duration: float = 0.2) -> None:
+    async def _step(self, duration: float = 0.03) -> None:
         if self._emitter:
             await asyncio.sleep(duration)
 
@@ -732,7 +732,7 @@ class ProcessingPipeline:
         intero = input_signal.metadata.get("interoceptive_state", {})
         await self._emit("region_processing", "insula", "phase_3",
             f"Interoception: stress={intero.get('stress_level', 0):.2f}, energy={intero.get('energy_level', 0):.2f}")
-        await self._step(0.1)
+        await self._step()
 
         # ── 3f. mPFC: self-referential processing (Northoff 2006) ──
         # Load identity facts from semantic store each request
@@ -747,7 +747,7 @@ class ProcessingPipeline:
         self._apply_gain(self.mpfc, activation_profile)
         await self._emit("region_activation", "medial_pfc", self.mpfc.activation_level, "active")
         await self._emit("region_processing", "medial_pfc", "phase_3", "Self-model activated")
-        await self._step(0.1)
+        await self._step()
 
         # ── 3g. TPJ: Theory of Mind — user modeling (Frith & Frith 2006) ──
         await self.tpj.process(input_signal)
@@ -756,7 +756,7 @@ class ProcessingPipeline:
         await self._emit("region_activation", "tpj", self.tpj.activation_level, "active")
         await self._emit("signal_flow", "medial_pfc", "tpj", input_signal.type.value, 0.5)
         await self._emit("region_processing", "tpj", "phase_3", "User-model activated")
-        await self._step(0.1)
+        await self._step()
 
         # ── 3d. Ensure ECN for task engagement
         if (
@@ -899,7 +899,7 @@ class ProcessingPipeline:
                 preview = pfc_text[:120] if pfc_text else "(processing...)"
                 await self._emit("region_processing", "prefrontal_cortex", "executive",
                     f"{preview}{'...' if len(pfc_text) > 120 else ''}")
-            await self._step(0.3)
+            await self._step()
 
             if not plan_signal or plan_signal.type != SignalType.PLAN:
                 break
@@ -1189,7 +1189,7 @@ class ProcessingPipeline:
                         signals_count += 1
                         self._apply_gain(self.vta, activation_profile)
                         await self._emit("region_activation", "vta", self.vta.activation_level, "active")
-                        await self._step(0.15)
+                        await self._step()
 
                     # ── Procedural learning (Graybiel 2008, Fitts 1967)
                     reward = self.neuromodulators.reward_signal
@@ -1461,56 +1461,70 @@ class ProcessingPipeline:
 
         # ══════════════════════════════════════════════════════════════
         # Phase 7: Speech Production (Levelt 1989)
-        # ALWAYS runs — Broca formulates response, M1 articulates
+        # Runs in BACKGROUND — Broca refines, M1 formats.
+        # If Broca produces a different response, broadcast via WS.
         # ══════════════════════════════════════════════════════════════
 
-        if plan_signal:
-            plan_signal.metadata["comprehension"] = comprehension
-            broca_before = plan_signal
+        _plan_signal_broca = plan_signal
+        _pfc_response = result.response  # snapshot before Broca
+        _activation_profile = activation_profile
+        _comprehension_broca = comprehension
 
-            # Use activation profile to decide processing depth (Pessoa 2008)
-            if should_full_process("broca_area", activation_profile):
-                broca_result = await self.broca.process(plan_signal)
-            else:
-                # Low gain: skip LLM, use heuristic formatting only
-                self.broca._format_heuristic(plan_signal)
-                self.broca.emit_activation(0.4)
-                broca_result = plan_signal
-            signals_count += 1
-
-            # If Broca (LLM) produced improved output, use it
-            if broca_result and self.broca.llm_provider and should_full_process("broca_area", activation_profile):
-                for act in broca_result.payload.get("actions", []):
-                    new_text = act.get("args", {}).get("text")
-                    if new_text:
-                        result.response = new_text
-                        break
-                new_resp = broca_result.payload.get("response_text")
-                if new_resp:
-                    result.response = new_resp
-
-            self._apply_gain(self.broca, activation_profile)
-            await self._emit_region_io("broca", broca_before, broca_result, "language_formulation")
-            await self._emit("region_activation", "broca", self.broca.activation_level, "active")
-            if plan_signal:
-                await self._emit("region_processing", "broca", "phase_7", "Language formulation complete")
-            await self._step()
-
-            # M1: final output formatting (Levelt 1989: articulation)
-            m1_before = plan_signal
-            m1_result = await self.motor_cortex.process(plan_signal)
-            signals_count += 1
-            await self._emit_region_io("motor_cortex", m1_before, m1_result, "articulation")
-            await self._emit("region_activation", "motor_cortex", self.motor_cortex.activation_level, "active")
-            await self._step()
-
-        # Predictive coding: store prediction for next input (Friston 2005)
-        if result.response:
+        async def _background_broca() -> None:
+            """Phase 7: Broca + Motor Cortex (non-blocking)."""
             try:
-                pred_emb = self.memory._embed_fn(result.response)
-                self.predictor.store_prediction(pred_emb)
-            except Exception:
-                pass  # Prediction storage is best-effort
+                if not _plan_signal_broca:
+                    return
+
+                _plan_signal_broca.metadata["comprehension"] = _comprehension_broca
+                broca_before = _plan_signal_broca
+
+                if should_full_process("broca_area", _activation_profile):
+                    broca_result = await self.broca.process(_plan_signal_broca)
+                else:
+                    self.broca._format_heuristic(_plan_signal_broca)
+                    self.broca.emit_activation(0.4)
+                    broca_result = _plan_signal_broca
+
+                # Extract Broca's refined response
+                refined_response = None
+                if broca_result and self.broca.llm_provider and should_full_process("broca_area", _activation_profile):
+                    for act in broca_result.payload.get("actions", []):
+                        new_text = act.get("args", {}).get("text")
+                        if new_text:
+                            refined_response = new_text
+                            break
+                    if not refined_response:
+                        new_resp = broca_result.payload.get("response_text")
+                        if new_resp:
+                            refined_response = new_resp
+
+                self._apply_gain(self.broca, _activation_profile)
+                await self._emit_region_io("broca", broca_before, broca_result, "language_formulation")
+                await self._emit("region_activation", "broca", self.broca.activation_level, "active")
+                await self._emit("region_processing", "broca", "phase_7", "Language formulation complete")
+
+                # M1: final output formatting
+                await self.motor_cortex.process(_plan_signal_broca)
+                await self._emit("region_activation", "motor_cortex", self.motor_cortex.activation_level, "active")
+
+                # If Broca refined the response and it differs, broadcast update
+                if refined_response and refined_response != _pfc_response:
+                    await self._emit("broadcast", refined_response, "broca_refined")
+
+                # Predictive coding: store prediction for next input
+                final_resp = refined_response or _pfc_response
+                if final_resp:
+                    try:
+                        pred_emb = self.memory._embed_fn(final_resp)
+                        self.predictor.store_prediction(pred_emb)
+                    except Exception:
+                        pass
+
+            except Exception as e:
+                logger.error("Background Broca failed: %s", e, exc_info=True)
+
+        _aio.create_task(_background_broca())
 
         # ── GWT Broadcast (Baars 1988) — lightweight, in-memory
         self.workspace.submit(
@@ -1547,8 +1561,8 @@ class ProcessingPipeline:
 
         # ── Return response IMMEDIATELY ──
         # Phase 4 (encoding), KG storage, Phase 5 (consolidation),
-        # dreaming, neuromodulator decay, and brain state persistence
-        # all proceed in background via asyncio.create_task above.
+        # Phase 7 (Broca refinement), dreaming, neuromodulator decay,
+        # and brain state persistence all proceed in background.
         result.network_mode = self.network_ctrl.current_mode.value
         result.signals_processed = signals_count
         return result

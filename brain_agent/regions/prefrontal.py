@@ -267,15 +267,6 @@ class PrefrontalCortex(BrainRegion):
         if history:
             system_parts.append(f"# Conversation History\n\n{history}")
 
-        # Daily notes (memory/YYYY-MM-DD.md — recent 2 days of detailed context)
-        try:
-            from brain_agent.memory.narrative_consolidation import load_daily_notes
-            daily = load_daily_notes(days=2)
-            if daily:
-                system_parts.append(f"# Recent Daily Notes\n\n{daily}")
-        except Exception:
-            pass
-
         # ── 3. Inject upstream neural processing results ──
 
         # Phase 2: Wernicke comprehension (ventral stream analysis)

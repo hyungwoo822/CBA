@@ -101,18 +101,23 @@ export function useWebSocket(url: string) {
           })
           break
         case 'broadcast': {
-          // PFC response arrives via WebSocket BEFORE HTTP response completes.
-          // Show it immediately in chat so the user doesn't wait for background tasks.
           const msg = data.payload?.content
+          const source = data.payload?.origin
           if (msg && typeof msg === 'string' && !msg.startsWith('tool_') && msg !== 'action_executed') {
             const s = useBrainStore.getState()
-            // Only add if not a duplicate of the last brain message
-            const last = s.chatMessages[s.chatMessages.length - 1]
-            if (!last || last.role !== 'brain' || last.text !== msg) {
-              const steps = [...s.thinkingSteps]
-              s.addChatMessage({ role: 'brain', text: msg, thinkingSteps: steps.length > 0 ? steps : undefined, ts: Date.now() })
+            if (source === 'broca_refined') {
+              // Broca refined the response — update the last brain message in-place
+              s.updateLastBrainMessage(msg)
               s.setLastResponse(msg)
-              s.setChatLoading(false)
+            } else {
+              // PFC response — show immediately, don't wait for Broca
+              const last = s.chatMessages[s.chatMessages.length - 1]
+              if (!last || last.role !== 'brain' || last.text !== msg) {
+                const steps = [...s.thinkingSteps]
+                s.addChatMessage({ role: 'brain', text: msg, thinkingSteps: steps.length > 0 ? steps : undefined, ts: Date.now() })
+                s.setLastResponse(msg)
+                s.setChatLoading(false)
+              }
             }
           }
           break

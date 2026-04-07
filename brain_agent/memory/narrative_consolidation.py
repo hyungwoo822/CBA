@@ -448,9 +448,6 @@ async def narrative_consolidate(
         # Rotate HISTORY.md — keep only the last N entries
         _rotate_history("memory/HISTORY.md", _MAX_HISTORY_ENTRIES)
 
-        # Append to daily note (memory/YYYY-MM-DD.md) for recent context
-        _append_daily_note(memory_lines)
-
         return True
 
     except Exception as e:

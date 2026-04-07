@@ -75,6 +75,7 @@ interface BrainState {
   removeAttachedFile: (name: string) => void
   clearAttachedFiles: () => void
   addChatMessage: (msg: BrainState['chatMessages'][0]) => void
+  updateLastBrainMessage: (text: string) => void
   addThinkingStep: (step: BrainState['thinkingSteps'][0]) => void
   clearThinkingSteps: () => void
   setDragOver: (v: boolean) => void
@@ -203,6 +204,24 @@ export const useBrainStore = create<BrainState>((set) => ({
         body: JSON.stringify(msg),
     }).catch(() => {})
   },
+  updateLastBrainMessage: (text) => {
+    set((s) => {
+      const msgs = [...s.chatMessages]
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'brain') {
+          msgs[i] = { ...msgs[i], text }
+          break
+        }
+      }
+      return { chatMessages: msgs }
+    })
+    // Persist updated message
+    fetch('/api/chat/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'brain', text, ts: Date.now(), updated: true }),
+    }).catch(() => {})
+  },
   addThinkingStep: (step) => set((s) => ({ thinkingSteps: [...s.thinkingSteps.slice(-19), step] })),
   clearThinkingSteps: () => set({ thinkingSteps: [] }),
   setDragOver: (v) => set({ isDragOver: v }),
@@ -247,11 +266,10 @@ export const useBrainStore = create<BrainState>((set) => ({
       })
       const data = await res.json()
       const responseText = data.response || data.error || 'No response'
-      useBrainStore.getState().setLastResponse(responseText)
-      // Only add HTTP response if WebSocket broadcast didn't already add it
-      const msgs = useBrainStore.getState().chatMessages
-      const lastMsg = msgs[msgs.length - 1]
-      if (!lastMsg || lastMsg.role !== 'brain' || lastMsg.text !== responseText) {
+      // Only add HTTP response if WS broadcast didn't already deliver it.
+      // WS broadcast sets chatLoading=false — if it's already false, WS handled it.
+      if (useBrainStore.getState().chatLoading) {
+        useBrainStore.getState().setLastResponse(responseText)
         const steps = [...useBrainStore.getState().thinkingSteps]
         useBrainStore.getState().addChatMessage({ role: 'brain', text: responseText, thinkingSteps: steps.length > 0 ? steps : undefined, ts: Date.now() })
       }

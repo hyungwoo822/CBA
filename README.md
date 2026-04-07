@@ -3,6 +3,7 @@
 </p>
 
 <h1 align="center">CBA — Clone your Brain into Agent</h1>
+<h2 align="center">Who will control Ralph?</h2>
 
 <p align="center">
   <img src="https://img.shields.io/badge/tests-621%20passed-brightgreen" alt="tests">

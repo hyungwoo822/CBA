@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Callable
 
@@ -210,111 +211,131 @@ class MemoryManager:
         context_embedding = self._embed_fn(context) if context else query_embedding
         candidates: list[dict] = []
 
-        # 1. Semantic store — vector similarity search via ChromaDB
-        try:
-            semantic_results = await self.semantic.search(query, top_k=top_k * 2)
-            for mem in semantic_results:
-                relevance = 1.0 - min(1.0, mem.get("distance", 0.5) or 0.5)
-                candidates.append({
-                    "id": mem["id"],
-                    "content": mem["content"],
-                    "source": "semantic",
-                    "relevance": relevance,
-                    "importance": mem.get("metadata", {}).get("strength", 0.5),
-                    "access_count": int(mem.get("metadata", {}).get("access_count", 0)),
-                    "recency_distance": 0.0,
-                    "context_similarity": relevance,
-                })
-        except Exception:
-            pass
+        # ── Parallel retrieval: semantic + episodic + spread activation ──
+        query_nodes = [w for w in query.split() if len(w) >= 3]
+
+        async def _fetch_semantic() -> list[dict]:
+            try:
+                return await self.semantic.search(query, top_k=top_k * 2)
+            except Exception:
+                return []
+
+        async def _fetch_episodic() -> list[dict]:
+            try:
+                return await self.episodic.get_recent(limit=top_k * 4)
+            except Exception:
+                return []
+
+        async def _fetch_activation() -> dict[str, float]:
+            try:
+                if query_nodes:
+                    act = await self.semantic.spread_activation(
+                        start_nodes=query_nodes, max_hops=2, decay=0.85,
+                    )
+                    for n in query_nodes:
+                        act.pop(n, None)
+                    return act
+            except Exception:
+                pass
+            return {}
+
+        semantic_results, recent, activated = await asyncio.gather(
+            _fetch_semantic(), _fetch_episodic(), _fetch_activation(),
+        )
+
+        # 1. Semantic store — vector similarity
+        for mem in semantic_results:
+            relevance = 1.0 - min(1.0, mem.get("distance", 0.5) or 0.5)
+            candidates.append({
+                "id": mem["id"],
+                "content": mem["content"],
+                "source": "semantic",
+                "relevance": relevance,
+                "importance": mem.get("metadata", {}).get("strength", 0.5),
+                "access_count": int(mem.get("metadata", {}).get("access_count", 0)),
+                "recency_distance": 0.0,
+                "context_similarity": relevance,
+            })
 
         # 2. Episodic store — recent episodes scored with embedding similarity
-        try:
-            recent = await self.episodic.get_recent(limit=top_k * 4)
-            for ep in recent:
-                ep_embedding = ep.get("context_embedding", [])
-                if ep_embedding and query_embedding:
-                    relevance = self._cosine_sim(query_embedding, ep_embedding)
-                    ctx_sim = self._cosine_sim(context_embedding, ep_embedding)
-                else:
-                    relevance = 0.0
-                    ctx_sim = 0.0
+        for ep in recent:
+            ep_embedding = ep.get("context_embedding", [])
+            if ep_embedding and query_embedding:
+                relevance = self._cosine_sim(query_embedding, ep_embedding)
+                ctx_sim = self._cosine_sim(context_embedding, ep_embedding)
+            else:
+                relevance = 0.0
+                ctx_sim = 0.0
 
-                recency_dist = float(
-                    max(0, self._interaction_counter - ep.get("last_interaction", 0))
-                )
-                strength = ep.get("strength", 1.0)
+            recency_dist = float(
+                max(0, self._interaction_counter - ep.get("last_interaction", 0))
+            )
+            strength = ep.get("strength", 1.0)
 
-                # Apply Ebbinghaus forgetting — skip effectively forgotten memories
-                retention = self.forgetting.retention(recency_dist, strength)
-                if retention < 0.01:
+            # Apply Ebbinghaus forgetting — skip effectively forgotten memories
+            retention = self.forgetting.retention(recency_dist, strength)
+            if retention < 0.01:
+                continue
+
+            etag = ep.get("emotional_tag", {})
+            arousal = etag.get("arousal", 0.0) if isinstance(etag, dict) else 0.0
+
+            candidates.append({
+                "id": ep["id"],
+                "content": ep["content"],
+                "source": "episodic",
+                "relevance": relevance * retention,
+                "importance": arousal,
+                "access_count": ep.get("access_count", 0),
+                "recency_distance": recency_dist,
+                "context_similarity": ctx_sim,
+            })
+
+        # 3. Spreading activation — parallel search for activated nodes
+        if activated:
+            nodes_to_search = [(n, lv) for n, lv in activated.items() if lv >= 0.1]
+
+            async def _search_node(node: str, act_level: float) -> list[dict]:
+                results = []
+                try:
+                    for mem in await self.semantic.search(node, top_k=3):
+                        relevance = 1.0 - min(1.0, mem.get("distance", 0.5) or 0.5)
+                        results.append({
+                            "id": mem["id"],
+                            "content": mem["content"],
+                            "source": "semantic",
+                            "relevance": relevance,
+                            "importance": mem.get("metadata", {}).get("strength", 0.5),
+                            "access_count": int(mem.get("metadata", {}).get("access_count", 0)),
+                            "recency_distance": 0.0,
+                            "context_similarity": relevance,
+                            "activation_boost": act_level,
+                        })
+                except Exception:
+                    pass
+                return results
+
+            # 3a. Parallel search for all activated nodes
+            node_results = await asyncio.gather(
+                *[_search_node(n, lv) for n, lv in nodes_to_search]
+            )
+            seen_ids = {c["id"] for c in candidates}
+            for batch in node_results:
+                for mem in batch:
+                    if mem["id"] not in seen_ids:
+                        seen_ids.add(mem["id"])
+                        candidates.append(mem)
+
+            # 3b. Boost existing candidates whose content mentions activated nodes
+            for c in candidates:
+                if "activation_boost" in c:
                     continue
-
-                etag = ep.get("emotional_tag", {})
-                arousal = etag.get("arousal", 0.0) if isinstance(etag, dict) else 0.0
-
-                candidates.append({
-                    "id": ep["id"],
-                    "content": ep["content"],
-                    "source": "episodic",
-                    "relevance": relevance * retention,
-                    "importance": arousal,
-                    "access_count": ep.get("access_count", 0),
-                    "recency_distance": recency_dist,
-                    "context_similarity": ctx_sim,
-                })
-        except Exception:
-            pass
-
-        # 3. Spreading activation — expand search via knowledge graph
-        activated: dict[str, float] = {}
-        try:
-            query_nodes = [w for w in query.split() if len(w) >= 3]
-            if query_nodes:
-                activated = await self.semantic.spread_activation(
-                    start_nodes=query_nodes, max_hops=2, decay=0.85,
-                )
-                # Remove start nodes (activation=1.0) — they already drove
-                # the initial semantic search.
-                for n in query_nodes:
-                    activated.pop(n, None)
-
-                if activated:
-                    # 3a. Search for memories related to activated nodes
-                    seen_ids = {c["id"] for c in candidates}
-                    for node, act_level in activated.items():
-                        if act_level < 0.1:
-                            continue
-                        for mem in await self.semantic.search(node, top_k=3):
-                            if mem["id"] in seen_ids:
-                                continue
-                            seen_ids.add(mem["id"])
-                            relevance = 1.0 - min(1.0, mem.get("distance", 0.5) or 0.5)
-                            candidates.append({
-                                "id": mem["id"],
-                                "content": mem["content"],
-                                "source": "semantic",
-                                "relevance": relevance,
-                                "importance": mem.get("metadata", {}).get("strength", 0.5),
-                                "access_count": int(mem.get("metadata", {}).get("access_count", 0)),
-                                "recency_distance": 0.0,
-                                "context_similarity": relevance,
-                                "activation_boost": act_level,
-                            })
-
-                    # 3b. Boost existing candidates whose content mentions
-                    #     activated nodes.
-                    for c in candidates:
-                        if "activation_boost" in c:
-                            continue
-                        content_lower = c["content"].lower()
-                        boost = 0.0
-                        for node, act_level in activated.items():
-                            if node.lower() in content_lower:
-                                boost = max(boost, act_level)
-                        c["activation_boost"] = boost
-        except Exception:
-            pass
+                content_lower = c["content"].lower()
+                boost = 0.0
+                for node, act_level in activated.items():
+                    if node.lower() in content_lower:
+                        boost = max(boost, act_level)
+                c["activation_boost"] = boost
 
         # 4. Score all candidates via RetrievalEngine
         # Cortisol inhibits retrieval (de Quervain 2000)
@@ -341,23 +362,33 @@ class MemoryManager:
 
         # 6. Retrieval-Induced Forgetting — suppress episodic competitors
         #    (Anderson 1994)
-        for c in candidates[top_k:]:
-            if c["source"] == "episodic" and c["relevance"] > 0.3:
-                ep = await self.episodic.get_by_id(c["id"])
-                if ep:
-                    new_str = self.forgetting.retrieval_induced_forgetting(
-                        ep["strength"],
-                    )
-                    await self.episodic.update_strength(c["id"], new_str)
+        async def _apply_rif(c: dict) -> None:
+            ep = await self.episodic.get_by_id(c["id"])
+            if ep:
+                new_str = self.forgetting.retrieval_induced_forgetting(ep["strength"])
+                await self.episodic.update_strength(c["id"], new_str)
+
+        rif_tasks = [
+            _apply_rif(c) for c in candidates[top_k:]
+            if c["source"] == "episodic" and c["relevance"] > 0.3
+        ]
+        if rif_tasks:
+            await asyncio.gather(*rif_tasks)
 
         # 7. SM-2 retrieval boost + reconsolidation for retrieved episodic
         #    memories (Wozniak 1990, Nader 2000)
-        for c in top_results:
-            if c["source"] == "episodic":
-                await self.episodic.on_retrieval(c["id"], boost=1.5)
-                await self.episodic.reconsolidate(
-                    c["id"], self._interaction_counter, self._session_id,
-                )
+        async def _boost_and_reconsolidate(c: dict) -> None:
+            await self.episodic.on_retrieval(c["id"], boost=1.5)
+            await self.episodic.reconsolidate(
+                c["id"], self._interaction_counter, self._session_id,
+            )
+
+        boost_tasks = [
+            _boost_and_reconsolidate(c) for c in top_results
+            if c["source"] == "episodic"
+        ]
+        if boost_tasks:
+            await asyncio.gather(*boost_tasks)
 
         # 8. Track recalls for dreaming (Diekelmann & Born 2010)
         for c in top_results:
