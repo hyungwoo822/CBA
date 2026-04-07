@@ -1,9 +1,11 @@
 import pytest
+from unittest.mock import AsyncMock, MagicMock
 from brain_agent.core.signals import Signal, SignalType, EmotionalTag
 from brain_agent.regions.wernicke import WernickeArea
 from brain_agent.regions.amygdala import Amygdala
 from brain_agent.regions.prefrontal import PrefrontalCortex
 from brain_agent.regions.broca import BrocaArea
+from brain_agent.providers.base import LLMResponse
 
 
 class TestWernickeInject:
@@ -113,3 +115,35 @@ class TestBrocaInject:
         )
         b.inject_refined(signal, None)
         assert signal.payload["actions"][0]["args"]["text"] == "original"
+
+
+class TestPostSynapticConsolidation:
+    @pytest.mark.asyncio
+    async def test_psc_parses_response(self):
+        from brain_agent.pipeline import ProcessingPipeline
+        from brain_agent.memory.manager import MemoryManager
+
+        mock_mem = MagicMock(spec=MemoryManager)
+        mock_mem.sensory = MagicMock()
+        mock_mem.working = MagicMock()
+        mock_mem.brain_state = MagicMock()
+        mock_mem.recall_tracker = MagicMock()
+        mock_mem.set_neuromodulators = MagicMock()
+        mock_mem.set_cortisol_accessor = MagicMock()
+        mock_provider = MagicMock()
+        mock_provider.chat = AsyncMock(return_value=LLMResponse(
+            content='{"refined_response": "polished text", '
+                    '"user_facts": {"entities": ["weather"], "relations": [["user", "ask", "weather", 0.8, "ACTION"]]}, '
+                    '"procedural": null}',
+        ))
+
+        pipeline = ProcessingPipeline(memory=mock_mem, llm_provider=mock_provider)
+        result = await pipeline._post_synaptic_consolidation(
+            original_input="what is the weather",
+            agent_response="It is sunny today",
+            comprehension={"intent": "question", "language": "en"},
+        )
+
+        assert result["refined_response"] == "polished text"
+        assert result["user_facts"]["entities"] == ["weather"]
+        assert result["procedural"] is None

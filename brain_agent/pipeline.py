@@ -222,6 +222,68 @@ class ProcessingPipeline:
             return ctx.get("result", "")
         return await self.tool_registry.execute(tool_name, tool_params)
 
+    _PSC_SYSTEM_PROMPT = (
+        "You are the Post-Synaptic Consolidation processor — the brain's sleep-replay system "
+        "(Diekelmann & Born 2010). Given a conversation turn, perform THREE tasks simultaneously:\n\n"
+        "1. **Refine response** (Broca): Polish the agent's response for natural language quality. "
+        "If the response is already good, set refined_response to null.\n"
+        "2. **Extract user facts** (Hippocampus): Extract entities and relations about the user. "
+        "ALL entity names in English lowercase. Relations in English verb infinitives.\n"
+        "3. **Evaluate procedural pattern** (Striatum): If this interaction pattern is reusable, "
+        "output trigger+strategy. If not (trivial greetings, one-off questions), set procedural to null.\n\n"
+        "Output ONLY valid JSON:\n"
+        '{"refined_response": "..." | null,\n'
+        ' "user_facts": {"entities": ["e1"], "relations": [["subj","rel","obj",conf,"CAT"]]},\n'
+        ' "procedural": {"trigger": "pattern", "strategy": "approach"} | null}\n\n'
+        "Rules for user_facts:\n"
+        "- Confidence: 1.0=explicit, 0.8=implied, 0.6=inferred\n"
+        "- Categories: PREFERENCE|ACTION|ATTRIBUTE|SOCIAL|CAUSAL|IDENTITY|EMOTION\n"
+        "- Strip Korean particles from entity names\n"
+        "- Build multi-entity graph, not just user→X flat triples"
+    )
+
+    async def _post_synaptic_consolidation(
+        self,
+        original_input: str,
+        agent_response: str,
+        comprehension: dict,
+    ) -> dict:
+        """Single background LLM call merging Broca + fact extraction + procedural.
+
+        Analogous to hippocampal replay during slow-wave sleep (Diekelmann & Born 2010).
+        """
+        provider = getattr(self.pfc, 'llm_provider', None) or self._llm_provider
+        if not provider:
+            return {"refined_response": None, "user_facts": {"entities": [], "relations": []}, "procedural": None}
+
+        user_msg = (
+            f"User input: {original_input}\n"
+            f"Agent response: {agent_response}\n"
+            f"Detected intent: {comprehension.get('intent', 'unknown')}\n"
+            f"Language: {comprehension.get('language', 'auto')}"
+        )
+
+        try:
+            response = await provider.chat(
+                messages=[
+                    {"role": "system", "content": self._PSC_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_msg},
+                ],
+                max_tokens=1000,
+                temperature=0.1,
+            )
+            if response and response.content:
+                import json as _json
+                text = response.content.strip()
+                if text.startswith("```"):
+                    lines = [l for l in text.split("\n") if not l.strip().startswith("```")]
+                    text = "\n".join(lines).strip()
+                return _json.loads(text)
+        except Exception as e:
+            logger.warning("Post-Synaptic Consolidation failed: %s", e)
+
+        return {"refined_response": None, "user_facts": {"entities": [], "relations": []}, "procedural": None}
+
     async def restore_brain_state(self) -> None:
         """Load persisted neuromodulator and activation state from DB.
 
@@ -584,76 +646,35 @@ class ProcessingPipeline:
         #        → pSTS merge
         # ══════════════════════════════════════════════════════════════
 
-        # ── 2a. Parallel processing: Wernicke ∥ Amygdala ──────────
-        # In the brain, ventral stream comprehension and limbic emotional
-        # evaluation happen simultaneously on the same input.
+        # ── Phase 2: Structural analysis (algorithmic, no LLM) ──
+        # Deep comprehension + appraisal deferred to Cortical Integration (Phase 6).
+        # Pessoa 2008: cognition-emotion integration happens in unified cortical processing.
+        structural = self.wernicke._structural_parse(text)
+        input_signal.payload["comprehension"] = structural
+        comprehension = structural
+        self.wernicke.emit_activation(0.3)
+        signals_count += 1
 
-        # Create independent signal copies for parallel processing
-        wernicke_signal = Signal(
-            type=input_signal.type, source=input_signal.source,
-            payload=dict(input_signal.payload),
-        )
-        amygdala_signal = Signal(
-            type=input_signal.type, source=input_signal.source,
-            payload=dict(input_signal.payload),
-        )
+        await self._emit("region_processing", "wernicke", "phase_2",
+            f"Structural parse: {len(text.split())} words (cortical integration pending)",
+            {"keywords": comprehension.get("keywords", []), "complexity": comprehension.get("complexity", "?")})
 
-        # Run Wernicke and Amygdala in parallel when both need processing
-        has_text = bool(wernicke_signal.payload.get("text"))
-        if has_text:
-            wernicke_result, amygdala_result = await asyncio.gather(
-                self.wernicke.process(wernicke_signal),
-                self.amygdala.process(amygdala_signal),
-            )
-        else:
-            wernicke_result = wernicke_signal
-            amygdala_result = await self.amygdala.process(amygdala_signal)
-        signals_count += 2
-
-        # Merge Wernicke comprehension back into main signal
-        comprehension = {}
-        if "comprehension" in wernicke_result.payload:
-            input_signal.payload["comprehension"] = wernicke_result.payload["comprehension"]
-            comprehension = input_signal.payload["comprehension"]
-
-        # Always emit Wernicke processing status
-        if comprehension:
-            await self._emit("region_processing", "wernicke", "phase_2",
-                f"Language comprehension: intent={comprehension.get('intent', '?')}, lang={comprehension.get('language', '?')}",
-                {"keywords": comprehension.get("keywords", []), "complexity": comprehension.get("complexity", "?")})
-        else:
-            await self._emit("region_processing", "wernicke", "phase_2",
-                f"Structural parse: {len(text.split())} words (no LLM)")
-
-        # Modality-specific signal flow for dashboard visualization
         if input_modality == "auditory":
-            # Auditory ventral: A1→STG→STS→MTG→Wernicke (semantic)
             await self._emit("signal_flow", "auditory_cortex_l", "wernicke", "AUDIO_INPUT", 0.7)
         elif input_modality == "visual":
-            # Visual: V1 features fed to Wernicke for description comprehension
             await self._emit("signal_flow", "visual_cortex", "wernicke", "IMAGE_INPUT", 0.6)
         else:
-            # Text: direct language pathway to Wernicke
             await self._emit("signal_flow", "thalamus", "wernicke", "TEXT_INPUT", 0.6)
         await self._emit("region_activation", "wernicke", self.wernicke.activation_level, "active")
 
-        # Merge Amygdala emotional tag back into main signal
-        input_signal.emotional_tag = amygdala_result.emotional_tag
-        for key in ("amygdala_right", "amygdala_left", "amygdala_blend"):
-            if key in amygdala_result.metadata:
-                input_signal.metadata[key] = amygdala_result.metadata[key]
+        # Amygdala: deferred to cortical integration — set baseline
+        input_signal.emotional_tag = EmotionalTag(valence=0.0, arousal=0.15)
+        self.amygdala.emit_activation(0.15)
+        signals_count += 1
         await self._emit("region_activation", "amygdala", self.amygdala.activation_level, "active")
-        await self._emit("signal_flow", "thalamus", "amygdala", input_signal.type.value, self.amygdala.activation_level or 0.3)
-        # Always emit Amygdala processing status
-        etag_for_emit = input_signal.emotional_tag
-        amg_left = input_signal.metadata.get("amygdala_left", {})
-        if etag_for_emit:
-            await self._emit("region_processing", "amygdala", "phase_3",
-                f"Emotional evaluation: {amg_left.get('primary_emotion', 'neutral')}, valence={etag_for_emit.valence:.2f}, arousal={etag_for_emit.arousal:.2f}",
-                {"threat_level": amg_left.get("threat_level", "none")})
-        else:
-            await self._emit("region_processing", "amygdala", "phase_3",
-                "Emotional baseline: neutral (no LLM)")
+        await self._emit("signal_flow", "thalamus", "amygdala", input_signal.type.value, 0.3)
+        await self._emit("region_processing", "amygdala", "phase_3",
+            "Emotional baseline: neutral (cortical integration pending)")
         await self._step()
 
         # ── Content-driven activation profiling (Pessoa 2008) ──
@@ -923,9 +944,73 @@ class ProcessingPipeline:
         plan_signal = None
         conflict = None
         for reprocess_iter in range(MAX_REPROCESS + 1):
-            # ── PFC: plan with memory context (LLM reasoning)
+            # ── PFC: Cortical Integration (unified LLM call) ──
+            # Single call produces comprehension + appraisal + plan + entities
+            # (Pessoa 2008: unified cortical processing)
             pfc_before = input_signal
-            plan_signal = await self.pfc.process(input_signal)
+
+            if self.pfc.llm_provider:
+                cortical_prompt = self.pfc.build_cortical_system_prompt(
+                    upstream_context=input_signal.metadata.get("upstream_context", {}),
+                    memory_context=retrieved,
+                    network_mode=self.network_ctrl.current_mode.value,
+                )
+                messages = [{"role": "system", "content": cortical_prompt}]
+                messages.extend(self.pfc._conversation_history)
+                messages.append({"role": "user", "content": text})
+
+                response = await self.pfc.llm_provider.chat(messages)
+
+                if response and response.content:
+                    self.pfc._conversation_history.append({"role": "user", "content": text})
+                    self.pfc._conversation_history.append({"role": "assistant", "content": response.content})
+                    if len(self.pfc._conversation_history) > self.pfc._max_history:
+                        self.pfc._conversation_history = self.pfc._conversation_history[-self.pfc._max_history:]
+
+                    cortical = self.pfc.parse_cortical_response(response.content)
+
+                    # Inject comprehension into Wernicke (upgrades structural parse)
+                    self.wernicke.inject(input_signal, cortical["comprehension"])
+                    comprehension = cortical["comprehension"]
+                    input_signal.payload["comprehension"] = comprehension
+
+                    # Inject appraisal into Amygdala (replaces baseline)
+                    self.amygdala.inject(input_signal, cortical["appraisal"])
+
+                    await self._emit("region_processing", "wernicke", "phase_2",
+                        f"Cortical comprehension: intent={comprehension.get('intent', '?')}, lang={comprehension.get('language', '?')}",
+                        {"keywords": comprehension.get("keywords", [])})
+                    await self._emit("region_activation", "wernicke", self.wernicke.activation_level, "active")
+
+                    etag = input_signal.emotional_tag
+                    amg_l = input_signal.metadata.get("amygdala_left", {})
+                    await self._emit("region_processing", "amygdala", "phase_3",
+                        f"Cortical appraisal: {amg_l.get('primary_emotion', 'neutral')}, "
+                        f"valence={etag.valence:.2f}, arousal={etag.arousal:.2f}")
+                    await self._emit("region_activation", "amygdala", self.amygdala.activation_level, "active")
+
+                    # Build plan signal
+                    response_text = cortical.get("response", "")
+                    plan_signal = Signal(
+                        type=SignalType.PLAN,
+                        source="prefrontal_cortex",
+                        payload={
+                            "actions": [{"tool": "respond", "args": {"text": response_text}}],
+                            "response_text": response_text,
+                        },
+                        emotional_tag=input_signal.emotional_tag,
+                    )
+                    plan_signal.metadata["neuromodulators"] = self.neuromodulators.snapshot()
+                    plan_signal.metadata["extracted_entities"] = cortical.get("entities", {})
+                    plan_signal.metadata["metacognition"] = {"confidence": cortical.get("confidence", 0.7)}
+
+                    # Hemisphere activation
+                    self.pfc._compute_hemisphere_activations(self.network_ctrl.current_mode.value)
+                else:
+                    plan_signal = await self.pfc.process(input_signal)
+            else:
+                plan_signal = await self.pfc.process(input_signal)
+
             signals_count += 1
             self._apply_gain(self.pfc, activation_profile)
             await self._emit("region_activation", "prefrontal_cortex", self.pfc.activation_level, "high_activity")
@@ -1149,33 +1234,7 @@ class ProcessingPipeline:
                     self.neuro_ctrl.on_prediction_error(pred_error, pred, actual_outcome)
                     await self._emit("neuromodulator_update", **self.neuromodulators.snapshot())
 
-                    # ── Procedural learning (Graybiel 2008, Fitts 1967)
-                    reward = self.neuromodulators.reward_signal
-                    text_len = len(text.split())
-                    logger.info("Procedural gate (action path): pred_error=%.3f, reward=%.3f, words=%d", pred_error, reward, text_len)
-                    if pred_error < MINOR_ERROR_THRESHOLD and reward > 0.2 and text_len >= 4:
-                        try:
-                            existing = await self.memory.procedural.match(text)
-                            if existing:
-                                await self.memory.procedural.record_execution(existing["id"], success=True)
-                                logger.info("Procedural: reinforced '%s'", existing["trigger_pattern"])
-                            else:
-                                eval_result = await self.pfc.evaluate_procedural(
-                                    input_text=text,
-                                    response_text=result.response,
-                                    comprehension=comprehension,
-                                )
-                                if eval_result:
-                                    await self.memory.procedural.save(
-                                        trigger_pattern=eval_result["trigger"],
-                                        strategy=eval_result["strategy"],
-                                        action_sequence=[action],
-                                    )
-                                    logger.info("Procedural: saved '%s'", eval_result["trigger"])
-                                else:
-                                    logger.info("Procedural: LLM returned None (not a pattern)")
-                        except Exception as e:
-                            logger.warning("Procedural learning failed: %s", e, exc_info=True)
+                    # Procedural learning deferred to PSC (Post-Synaptic Consolidation)
 
                     self.neuro_ctrl.on_reward_outcome(success=(pred_error < 0.3))
                     await self._emit("neuromodulator_update", **self.neuromodulators.snapshot())
@@ -1190,13 +1249,13 @@ class ProcessingPipeline:
                                 break
 
                     # ── Cerebellum: evaluate result (model learning)
-                    predicted = action_signal.payload.get("predicted_outcome", "success")
-                    tool_name = action.get("tool", "unknown")
+                    predicted = action_signal.payload.get("predicted_outcome", "success") if action_signal else "success"
+                    tool_name = action.get("tool", "unknown") if action_signal else "respond"
                     await self._emit("signal_flow", "basal_ganglia", "cerebellum", "ACTION_RESULT", 0.5)
 
                     # Compute prediction error dynamically based on action confidence
                     # and emotional context (McGaugh 2004: arousal modulates error signal)
-                    action_confidence = action_signal.payload.get("go_score", 0.7)
+                    action_confidence = action_signal.payload.get("go_score", 0.7) if action_signal else 0.7
                     emotional_arousal = (
                         input_signal.emotional_tag.arousal if input_signal.emotional_tag else 0.0
                     )
@@ -1220,7 +1279,7 @@ class ProcessingPipeline:
                         signals_count += 1
 
                     # Neuromodulator: prediction error → DA (Schultz 1997)
-                    pred = action_signal.payload.get("predicted_outcome", "success")
+                    pred = action_signal.payload.get("predicted_outcome", "success") if action_signal else "success"
                     pred_error = float(result_signal.payload.get("error", 0.05))
                     actual_outcome = "success" if pred_error < 0.3 else "failure"
                     self.neuro_ctrl.on_prediction_error(pred_error, pred, actual_outcome)
@@ -1234,37 +1293,7 @@ class ProcessingPipeline:
                         await self._emit("region_activation", "vta", self.vta.activation_level, "active")
                         await self._step()
 
-                    # ── Procedural learning (Graybiel 2008, Fitts 1967)
-                    reward = self.neuromodulators.reward_signal
-                    text_len = len(text.split())
-                    logger.info("Procedural gate (else path): pred_error=%.3f (<%.1f?), reward=%.3f (>0.2?), words=%d (>=4?)",
-                                pred_error, MINOR_ERROR_THRESHOLD, reward, text_len)
-                    if pred_error < MINOR_ERROR_THRESHOLD and reward > 0.2 and text_len >= 4:
-                        try:
-                            existing = await self.memory.procedural.match(text)
-                            if existing:
-                                await self.memory.procedural.record_execution(
-                                    existing["id"], success=True,
-                                )
-                                logger.info("Procedural: reinforced existing '%s'", existing["trigger_pattern"])
-                            else:
-                                eval_result = await self.pfc.evaluate_procedural(
-                                    input_text=text,
-                                    response_text=result.response,
-                                    comprehension=comprehension,
-                                )
-                                if eval_result:
-                                    await self.memory.procedural.save(
-                                        trigger_pattern=eval_result["trigger"],
-                                        strategy=eval_result["strategy"],
-                                        action_sequence=[action],
-                                    )
-                                    logger.info("Procedural: saved new '%s' -> '%s'",
-                                                eval_result["trigger"], eval_result["strategy"])
-                                else:
-                                    logger.info("Procedural: LLM returned None (not a pattern)")
-                        except Exception as e:
-                            logger.warning("Procedural learning failed: %s", e, exc_info=True)
+                    # Procedural learning deferred to PSC (Post-Synaptic Consolidation)
 
                     # Neuromodulator: reward outcome → 5-HT (Doya 2002)
                     self.neuro_ctrl.on_reward_outcome(success=(pred_error < 0.3))
@@ -1385,13 +1414,17 @@ class ProcessingPipeline:
                 await self._emit("region_processing", "hippocampus", "phase_4",
                     f"Encoded to hippocampus: {encode_modality} modality, strength={lr:.2f}")
 
-                # ── Semantic fact storage (Eichenbaum 2000) ──
+                # ── Post-Synaptic Consolidation (unified background LLM) ──
+                # Merges Broca refinement + fact extraction + procedural eval
+                # into single consolidation cycle (Diekelmann & Born 2010)
+
+                # 1. Store PFC-extracted entities (from cortical integration, no extra LLM)
                 if _plan_signal:
                     _extracted = _plan_signal.metadata.get("extracted_entities", {})
                     kg_entities = _extracted.get("entities", [])
                     about_user = _extracted.get("about_user", [])
                     knowledge = _extracted.get("knowledge", [])
-                    logger.info("KG extraction: %d entities, %d about_user, %d knowledge from PFC",
+                    logger.info("KG extraction: %d entities, %d about_user, %d knowledge from cortical integration",
                                 len(kg_entities), len(about_user), len(knowledge))
 
                     kw = _comprehension.get("keywords", [])
@@ -1417,22 +1450,41 @@ class ProcessingPipeline:
                             facts=facts_k if facts_k else None, origin="agent_knowledge",
                         )
 
-                # User-input fact extraction (LLM call — runs in background)
-                # Stored as user_input ONLY — this is the ground truth of what
-                # the user said. agent_about_user comes from PFC extraction
-                # (what the agent understood). Sync rate = gap between them.
+                # 2. PSC: single LLM call for user facts + procedural (replaces _extract_user_facts + procedural eval)
                 if self.pfc.llm_provider and _comprehension.get("intent"):
                     try:
-                        user_extract = await self._extract_user_facts(_input_text, _comprehension)
-                        if user_extract:
-                            u_ents = user_extract.get("entities", [])
-                            u_rels = user_extract.get("relations", [])
+                        psc_result = await self._post_synaptic_consolidation(
+                            original_input=_input_text,
+                            agent_response=result.response,
+                            comprehension=_comprehension,
+                        )
+
+                        # User facts from PSC
+                        u_facts = psc_result.get("user_facts", {})
+                        if u_facts.get("entities") or u_facts.get("relations"):
                             await self.memory.store_semantic_facts(
-                                entities=u_ents, relations=u_rels, origin="user_input",
+                                entities=u_facts.get("entities", []),
+                                relations=u_facts.get("relations", []),
+                                origin="user_input",
                             )
-                            await self._store_identity_facts_realtime(u_rels, source="user_input")
+                            await self._store_identity_facts_realtime(
+                                u_facts.get("relations", []), source="psc_consolidation",
+                            )
+
+                        # Procedural from PSC
+                        proc = psc_result.get("procedural")
+                        if proc and proc.get("trigger"):
+                            try:
+                                await self.memory.procedural.save(
+                                    trigger_pattern=proc["trigger"],
+                                    strategy=proc["strategy"],
+                                    action_sequence=[],
+                                )
+                                logger.info("PSC procedural: cached '%s'", proc["trigger"])
+                            except Exception as e:
+                                logger.warning("PSC procedural save failed: %s", e)
                     except Exception:
-                        logger.warning("User fact extraction failed", exc_info=True)
+                        logger.warning("PSC consolidation failed", exc_info=True)
 
                 # ── Phase 5: Consolidation ──
                 staging_count = await self.memory.staging.count_unconsolidated()
@@ -1519,58 +1571,17 @@ class ProcessingPipeline:
         _comprehension_broca = comprehension
 
         async def _background_broca() -> None:
-            """Phase 7: Broca + Motor Cortex (non-blocking)."""
+            """Phase 7: Broca heuristic formatting (LLM refinement via PSC)."""
             try:
                 if not _plan_signal_broca:
                     return
-
-                _plan_signal_broca.metadata["comprehension"] = _comprehension_broca
-                broca_before = _plan_signal_broca
-
-                if should_full_process("broca_area", _activation_profile):
-                    broca_result = await self.broca.process(_plan_signal_broca)
-                else:
-                    self.broca._format_heuristic(_plan_signal_broca)
-                    self.broca.emit_activation(0.4)
-                    broca_result = _plan_signal_broca
-
-                # Extract Broca's refined response
-                refined_response = None
-                if broca_result and self.broca.llm_provider and should_full_process("broca_area", _activation_profile):
-                    for act in broca_result.payload.get("actions", []):
-                        new_text = act.get("args", {}).get("text")
-                        if new_text:
-                            refined_response = new_text
-                            break
-                    if not refined_response:
-                        new_resp = broca_result.payload.get("response_text")
-                        if new_resp:
-                            refined_response = new_resp
-
+                self.broca._format_heuristic(_plan_signal_broca)
+                self.broca.emit_activation(0.4)
                 self._apply_gain(self.broca, _activation_profile)
-                await self._emit_region_io("broca", broca_before, broca_result, "language_formulation")
                 await self._emit("region_activation", "broca", self.broca.activation_level, "active")
-                await self._emit("region_processing", "broca", "phase_7", "Language formulation complete")
-
-                # M1: final output formatting
-                await self.motor_cortex.process(_plan_signal_broca)
-                await self._emit("region_activation", "motor_cortex", self.motor_cortex.activation_level, "active")
-
-                # If Broca refined the response and it differs, broadcast update
-                if refined_response and refined_response != _pfc_response:
-                    await self._emit("broadcast", refined_response, "broca_refined")
-
-                # Predictive coding: store prediction for next input
-                final_resp = refined_response or _pfc_response
-                if final_resp:
-                    try:
-                        pred_emb = self.memory._embed_fn(final_resp)
-                        self.predictor.store_prediction(pred_emb)
-                    except Exception:
-                        pass
-
+                await self._emit("region_processing", "broca", "phase_7", "Heuristic formatting (PSC handles refinement)")
             except Exception as e:
-                logger.error("Background Broca failed: %s", e, exc_info=True)
+                logger.warning("Background Broca failed: %s", e)
 
         _aio.create_task(_background_broca())
 
