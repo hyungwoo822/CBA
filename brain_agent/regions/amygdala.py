@@ -260,6 +260,47 @@ class Amygdala(BrainRegion):
         self.emit_activation(tag.arousal)
         return signal
 
+    def inject(self, signal: Signal, appraisal: dict) -> Signal:
+        """Receive pre-computed appraisal from Cortical Integration.
+
+        Populates both hemisphere metadata and the unified emotional_tag
+        so downstream processing (BasalGanglia, memory encoding) sees
+        the same structure as the original dual-hemisphere flow.
+        """
+        valence = appraisal.get("valence", 0.0)
+        arousal = appraisal.get("arousal", 0.0)
+        threat = appraisal.get("threat_detected", False)
+        primary = appraisal.get("primary_emotion", "neutral")
+        contextual = appraisal.get("contextual_factors", {})
+
+        # Populate hemisphere metadata for downstream compatibility
+        signal.metadata["amygdala_right"] = {
+            "valence": valence,
+            "arousal": arousal,
+            "threat_detected": threat,
+        }
+        signal.metadata["amygdala_left"] = {
+            "valence": valence,
+            "arousal": arousal,
+            "threat_level": "high" if threat else "none",
+            "primary_emotion": primary,
+            "contextual_factors": contextual,
+        }
+        signal.metadata["amygdala_blend"] = {
+            "valence": valence,
+            "arousal": arousal,
+            "threat": threat,
+            "dominant_hemisphere": "right" if threat else "left",
+        }
+
+        signal.emotional_tag = EmotionalTag(valence=valence, arousal=arousal)
+
+        # Set activation from arousal (threat = higher activation)
+        self.emit_activation(arousal)
+        self.right.emit_activation(arousal * (0.8 if threat else 0.5))
+        self.left.emit_activation(arousal * (0.5 if threat else 0.8))
+        return signal
+
 
 def _parse_json(content: str) -> dict | None:
     """Parse JSON from LLM response, tolerating markdown fences."""
