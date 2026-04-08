@@ -15,39 +15,32 @@ export default function KnowledgeGraphModal() {
 
   return (
     <>
-      {/* Toggle button — positioned above the brain */}
+      {/* Toggle icon — floating above the brain, icon only, 3x size */}
       <button
         onClick={() => setOpen(v => !v)}
         title="Knowledge Graph"
         style={{
           position: 'fixed',
-          top: 12,
+          top: '18%',
           left: '50%',
-          transform: 'translateX(-50%)',
+          transform: 'translate(-50%, -50%)',
           zIndex: 900,
-          background: open ? 'rgba(139,92,246,0.25)' : 'rgba(15,23,42,0.7)',
-          border: open ? '1px solid rgba(139,92,246,0.5)' : '1px solid rgba(148,163,184,0.2)',
-          borderRadius: 8,
-          padding: '6px 10px',
+          background: open ? 'rgba(139,92,246,0.2)' : 'transparent',
+          border: 'none',
+          borderRadius: '50%',
+          padding: 10,
           cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          color: open ? '#c4b5fd' : 'rgba(226,232,240,0.7)',
-          fontSize: 11,
-          fontFamily: 'Inter, system-ui, sans-serif',
-          backdropFilter: 'blur(8px)',
-          transition: 'all 0.2s ease',
+          color: open ? '#c4b5fd' : 'rgba(226,232,240,0.45)',
+          transition: 'all 0.25s ease',
+          filter: open ? 'drop-shadow(0 0 8px rgba(139,92,246,0.5))' : 'none',
         }}
       >
-        {/* Brain/thought icon */}
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z"/>
           <path d="M9 21h6"/>
           <path d="M10 17v4"/>
           <path d="M14 17v4"/>
         </svg>
-        Knowledge
       </button>
 
       {/* Floating modal */}
