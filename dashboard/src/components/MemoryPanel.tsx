@@ -2,9 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useBrainStore } from '../stores/brainState'
 import { useDraggable } from '../hooks/useDraggable'
 import ForceGraph2D from 'react-force-graph-2d'
-import KnowledgeGraphPanel from './KnowledgeGraphPanel'
-
-const TABS = ['Chat', 'Working', 'Staging', 'Episodic', 'Semantic', 'Procedural', 'Knowledge'] as const
+const TABS = ['Chat', 'Working', 'Staging', 'Episodic', 'Semantic', 'Procedural'] as const
 type Tab = typeof TABS[number]
 
 /** Fetch data on mount + refetch after each chat message. NO polling — stops constant refresh. */
@@ -31,20 +29,6 @@ export function MemoryPanel() {
   const [tab, setTab] = useState<Tab>('Chat')
   const { pos, onMouseDown: onDragMouseDown } = useDraggable('memory-panel', window.innerWidth - 390, 82)
   const bodyRef = useRef<HTMLDivElement>(null)
-  const [panelWidth, setPanelWidth] = useState(378)
-  const [availableHeight, setAvailableHeight] = useState(400)
-
-  useEffect(() => {
-    if (!bodyRef.current) return
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) {
-        setPanelWidth(e.contentRect.width)
-        setAvailableHeight(e.contentRect.height)
-      }
-    })
-    ro.observe(bodyRef.current)
-    return () => ro.disconnect()
-  }, [])
 
   useEffect(() => {
     (window as any).__memoryPanelSetTab = (t: Tab) => {
@@ -84,9 +68,6 @@ export function MemoryPanel() {
         {tab === 'Episodic' && <EpisodicTab />}
         {tab === 'Semantic' && <SemanticTab />}
         {tab === 'Procedural' && <ProceduralTab />}
-        {tab === 'Knowledge' && (
-          <KnowledgeGraphPanel width={panelWidth} height={availableHeight} />
-        )}
       </div>
     </div>
   )

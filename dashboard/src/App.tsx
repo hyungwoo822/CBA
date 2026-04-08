@@ -13,6 +13,7 @@ import { RegionBubbles } from './components/RegionBubble'
 import { MemoryPanel } from './components/MemoryPanel'
 import { ProfileEditModal } from './components/ProfileEditModal'
 import { ChannelToggle } from './components/ChannelToggle'
+import KnowledgeGraphModal from './components/KnowledgeGraphModal'
 import { useWebSocket } from './hooks/useWebSocket'
 import { resetAllPositions } from './hooks/useDraggable'
 import { useBrainStore } from './stores/brainState'
@@ -250,6 +251,7 @@ function App() {
       <ChatInput />
       <MemoryFlowBar />
       <ProfileEditModal />
+      <KnowledgeGraphModal />
     </div>
   )
 }
