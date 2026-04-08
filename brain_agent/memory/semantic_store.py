@@ -108,6 +108,16 @@ class SemanticStore:
                 UNIQUE(fact_type, key)
             )"""
         )
+        await self._graph_db.execute(
+            """CREATE TABLE IF NOT EXISTS hyperedges(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                label TEXT NOT NULL UNIQUE,
+                members TEXT NOT NULL,
+                category TEXT DEFAULT 'GENERAL',
+                strength REAL DEFAULT 1.0,
+                created_at TEXT
+            )"""
+        )
         await self._graph_db.commit()
 
     async def close(self):
@@ -519,3 +529,58 @@ class SemanticStore:
         G = await self.export_as_networkx()
         communities = cluster_graph(G)
         return surprising_connections(G, communities, top_n)
+
+    # ------------------------------------------------------------------
+    # Hyperedge / Cell Assembly methods (Hebb, 1949)
+    # ------------------------------------------------------------------
+
+    async def add_hyperedge(
+        self, members: list[str], label: str,
+        category: str = "GENERAL", strength: float = 1.0,
+    ) -> None:
+        """Add a cell assembly (hyperedge) connecting 3+ concepts.
+
+        Neuroscience: Hebb's Cell Assembly (1949) — neurons that fire
+        together wire together. Hyperedges represent group-level
+        activation patterns beyond pairwise connections.
+        """
+        import json
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        members_json = json.dumps(sorted(members))
+        async with aiosqlite.connect(self._graph_db_path) as db:
+            await db.execute(
+                """INSERT INTO hyperedges (label, members, category, strength, created_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(label) DO UPDATE SET
+                     members = excluded.members,
+                     category = excluded.category,
+                     strength = excluded.strength
+                """,
+                (label, members_json, category, strength, now),
+            )
+            await db.commit()
+
+    async def get_hyperedges(self) -> list[dict]:
+        """Return all cell assemblies."""
+        import json
+        async with aiosqlite.connect(self._graph_db_path) as db:
+            cursor = await db.execute(
+                "SELECT label, members, category, strength, created_at FROM hyperedges"
+            )
+            rows = await cursor.fetchall()
+        return [
+            {
+                "label": r[0],
+                "members": json.loads(r[1]),
+                "category": r[2],
+                "strength": r[3],
+                "created_at": r[4],
+            }
+            for r in rows
+        ]
+
+    async def get_assemblies_for_node(self, node: str) -> list[dict]:
+        """Return all cell assemblies containing a given node."""
+        all_edges = await self.get_hyperedges()
+        return [e for e in all_edges if node in e["members"]]
