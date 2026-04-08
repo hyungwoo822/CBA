@@ -12,12 +12,19 @@ class ProviderConfig(BaseModel):
     model: str = ""
 
 
+class GraphAnalysisConfig(BaseModel):
+    max_hub_concepts: int = Field(default=5, ge=1, le=20)
+    max_surprising: int = Field(default=3, ge=1, le=10)
+    max_communities_shown: int = Field(default=5, ge=1, le=20)
+
+
 class MemoryConfig(BaseModel):
     working_capacity: int = Field(default=4, ge=2, le=9)
     consolidation_threshold: int = Field(default=3, ge=1)
     homeostatic_factor: float = Field(default=0.97, ge=0.5, le=1.0)
     pruning_threshold: float = Field(default=0.05, ge=0.0, le=0.5)
     embedding_model: str = "all-MiniLM-L6-v2"
+    graph_analysis: GraphAnalysisConfig = Field(default_factory=GraphAnalysisConfig)
 
 
 class RetrievalWeights(BaseModel):
