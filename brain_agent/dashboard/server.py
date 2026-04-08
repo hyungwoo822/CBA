@@ -522,6 +522,64 @@ def create_app(static_dir: str | None = None, agent: "BrainAgent | None" = None)
             pass
         return {"documents": documents}
 
+    @app.get("/api/memory/knowledge-graph")
+    async def get_knowledge_graph():
+        """Return knowledge graph structure for visualization."""
+        agent_inst = _state["agent"]
+        if not agent_inst or not agent_inst.memory:
+            return {"nodes": [], "edges": [], "communities": {}, "hubs": []}
+        try:
+            G = await agent_inst.memory.semantic.export_as_networkx()
+            from brain_agent.memory.graph_analysis import (
+                cluster_graph, cohesion_scores, hub_concepts,
+            )
+            comms = cluster_graph(G)
+            scores = cohesion_scores(G, comms)
+            hubs = hub_concepts(G, top_n=10)
+            nodes = [
+                {
+                    "id": n,
+                    "label": G.nodes[n].get("label", n),
+                    "community": next(
+                        (cid for cid, members in comms.items() if n in members), -1
+                    ),
+                }
+                for n in G.nodes()
+            ]
+            edges = [
+                {
+                    "source": u,
+                    "target": v,
+                    "relation": d.get("relation", ""),
+                    "confidence": d.get("confidence", "INFERRED"),
+                    "weight": d.get("weight", 0.5),
+                }
+                for u, v, d in G.edges(data=True)
+            ]
+            return {
+                "nodes": nodes,
+                "edges": edges,
+                "communities": {
+                    str(cid): {"members": members, "cohesion": scores.get(cid, 0.0)}
+                    for cid, members in comms.items()
+                },
+                "hubs": hubs,
+            }
+        except Exception:
+            return {"nodes": [], "edges": [], "communities": {}, "hubs": []}
+
+    @app.get("/api/memory/hyperedges")
+    async def get_hyperedges():
+        """Return all cell assemblies (hyperedges)."""
+        agent_inst = _state["agent"]
+        if not agent_inst or not agent_inst.memory:
+            return {"hyperedges": []}
+        try:
+            edges = await agent_inst.memory.semantic.get_hyperedges()
+            return {"hyperedges": edges}
+        except Exception:
+            return {"hyperedges": []}
+
     @app.get("/api/memory/search")
     async def search_memory(q: str = "", top_k: int = 10):
         agent_inst = _state["agent"]

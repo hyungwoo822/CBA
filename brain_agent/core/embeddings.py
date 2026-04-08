@@ -1,6 +1,8 @@
 from __future__ import annotations
 import numpy as np
 
+from brain_agent.memory.embedding_cache import EmbeddingCache
+
 EMBEDDING_DIM = 384
 PATTERN_SEPARATION_SIGMA = 0.01
 
@@ -10,6 +12,7 @@ class EmbeddingService:
         self._use_mock = use_mock
         self._model = None
         self._model_name = model_name
+        self._cache = EmbeddingCache(max_size=10_000)
 
     def _get_model(self):
         if self._model is None and not self._use_mock:
@@ -17,12 +20,15 @@ class EmbeddingService:
             self._model = SentenceTransformer(self._model_name)
         return self._model
 
-    def embed(self, text: str) -> list[float]:
-        if self._use_mock:
-            return self._mock_embed(text)
+    def _compute_embed(self, text: str) -> list[float]:
         model = self._get_model()
         vec = model.encode(text, normalize_embeddings=True)
         return vec.tolist()
+
+    def embed(self, text: str) -> list[float]:
+        if self._use_mock:
+            return self._cache.get_or_compute(text, self._mock_embed)
+        return self._cache.get_or_compute(text, self._compute_embed)
 
     def cosine_similarity(self, a: list[float], b: list[float]) -> float:
         va = np.array(a, dtype=np.float32)

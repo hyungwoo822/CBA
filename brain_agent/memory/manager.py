@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import networkx as nx
 
 import numpy as np
 
@@ -245,6 +248,59 @@ class MemoryManager:
             lines.append(f"- {f['key']}: {f['value']}")
 
         return "\n".join(lines) if len(lines) > 1 else ""
+
+    async def render_compressed_context(self, max_tokens_hint: int = 500) -> str:
+        """Render a graph-compressed summary of semantic memory.
+
+        Instead of listing all memories, provides: hub concepts,
+        community structure, and surprising connections.
+
+        Neuroscience: chunking (Miller 1956) + gist extraction
+        (Reyna & Brainerd 1995). Compresses detailed memories into
+        structural summaries within working memory capacity.
+        """
+        try:
+            G = await self.semantic.export_as_networkx()
+        except Exception:
+            return await self.render_memory_context()
+
+        if G.number_of_nodes() == 0:
+            return ""
+
+        from brain_agent.memory.graph_analysis import (
+            cluster_graph,
+            cohesion_scores,
+            hub_concepts,
+            surprising_connections,
+        )
+
+        comms = cluster_graph(G)
+        scores = cohesion_scores(G, comms)
+        hubs = hub_concepts(G, top_n=5)
+        surprises = surprising_connections(G, comms, top_n=3)
+
+        lines = ["## Knowledge Graph Summary"]
+
+        if hubs:
+            lines.append("\n### Hub Concepts (most connected)")
+            for h in hubs:
+                lines.append(f"- **{h['label']}** ({h['edges']} connections)")
+
+        if comms:
+            lines.append(f"\n### {len(comms)} Concept Communities")
+            for cid in sorted(comms.keys())[:5]:
+                nodes = comms[cid]
+                score = scores.get(cid, 0.0)
+                labels = [G.nodes[n].get("label", n) for n in nodes[:5]]
+                suffix = f" +{len(nodes)-5} more" if len(nodes) > 5 else ""
+                lines.append(f"- Community {cid} (cohesion {score:.2f}): {', '.join(labels)}{suffix}")
+
+        if surprises:
+            lines.append("\n### Surprising Connections")
+            for s in surprises:
+                lines.append(f"- {s['source']} <-> {s['target']}: {s.get('why', '')}")
+
+        return "\n".join(lines)
 
     async def retrieve(
         self,
@@ -528,6 +584,19 @@ class MemoryManager:
                     source, relation, target, weight=weight, category=category
                 )
 
+    async def add_assembly(
+        self, members: list[str], label: str,
+        category: str = "GENERAL", strength: float = 1.0,
+    ) -> None:
+        """Add a cell assembly (hyperedge) to semantic memory."""
+        await self.semantic.add_hyperedge(members, label, category, strength)
+
+    async def get_assemblies(self, node: str | None = None) -> list[dict]:
+        """Get cell assemblies, optionally filtered by node membership."""
+        if node:
+            return await self.semantic.get_assemblies_for_node(node)
+        return await self.semantic.get_hyperedges()
+
     async def match_procedure(self, input_text: str) -> dict | None:
         """Check procedural store for a cached action sequence."""
         return await self.procedural.match(input_text)
@@ -546,6 +615,13 @@ class MemoryManager:
             "semantic": await self.semantic.count(),
             "procedural": proc_count,
         }
+
+    async def snapshot_graph(self) -> "nx.Graph":
+        """Take a snapshot of the current knowledge graph as NetworkX.
+
+        Used for graph_diff at session boundaries to track neuroplasticity.
+        """
+        return await self.semantic.export_as_networkx()
 
     # ------------------------------------------------------------------
     # Helpers

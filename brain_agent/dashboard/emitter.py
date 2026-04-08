@@ -66,3 +66,17 @@ class DashboardEmitter:
 
     async def broadcast(self, content: str, origin: str) -> None:
         await event_bus.emit("broadcast", {"content": content, "origin": origin})
+
+    async def knowledge_update(
+        self, node_count: int, edge_count: int, community_count: int,
+    ) -> None:
+        """Emit knowledge graph structural update."""
+        await event_bus.emit("knowledge_update", {
+            "nodes": node_count,
+            "edges": edge_count,
+            "communities": community_count,
+        })
+
+    async def knowledge_diff(self, diff: dict) -> None:
+        """Emit neuroplasticity diff (LTP/LTD/synaptogenesis/pruning)."""
+        await event_bus.emit("knowledge_diff", diff)

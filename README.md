@@ -193,8 +193,31 @@ Sensory Buffer --> Working Memory --> Hippocampal Staging --> Episodic Store
 | **Working Memory** | Baddeley model: phonological + visuospatial + episodic buffer |
 | **Hippocampal Staging** | ACh-modulated fast encoding |
 | **Episodic Store** | Ebbinghaus forgetting, reconsolidation |
-| **Semantic Store** | Knowledge graph, spreading activation, 9 category types |
+| **Semantic Store** | Knowledge graph with confidence tagging, Leiden community detection, spreading activation |
 | **Procedural Store** | DA-gated learning, 3-stage skill acquisition (Fitts 1967) |
+
+### Knowledge Graph Analysis
+
+The semantic store includes a graph analysis layer inspired by connectomics research. The knowledge graph is not a flat triple store — it has structure.
+
+| Feature | Mechanism | Neuroscience |
+|---------|-----------|-------------|
+| **Community Detection** | Leiden algorithm on concept graph | Cortical columns (Mountcastle 1997) |
+| **Hub Concepts** | Degree-ranked central nodes | Rich-club organization (van den Heuvel & Sporns 2011) |
+| **Surprising Connections** | Cross-community bridge scoring | Long-range cortical projections |
+| **Confidence Tagging** | EXTRACTED / INFERRED / AMBIGUOUS per edge | Signal Detection Theory (Green & Swets 1966) |
+| **Graph Diff** | LTP (new) / LTD (lost) / pruning classification | Synaptic plasticity (Bliss & Lomo 1973) |
+| **Compressed Context** | Graph summary instead of raw memory dump | Chunking (Miller 1956) |
+| **Embedding Cache** | SHA256 content-addressable LRU | Long-term potentiation (faster reactivation) |
+| **Cell Assemblies** | Hyperedge groups (3+ concepts) with co-activation | Hebb's Cell Assembly (1949) |
+| **Assembly Co-activation** | Active member triggers ensemble spread | Neural ensemble synchronization |
+| **Graph Pruning** | Weight decay + threshold pruning during consolidation | Synaptic pruning (Huttenlocher 1979) |
+| **Metacognitive Query** | MCP tools for self-inspecting knowledge | Metacognition (Flavell 1979) |
+| **Community-Aware Activation** | Intra-community spread bonus in retrieval | Cortical column facilitation |
+
+Confidence flows into the neuromodulator system: AMBIGUOUS edges raise NE (alertness) and ACh (learning), triggering ACC conflict monitoring. EXTRACTED edges pass through without friction. This mirrors how the brain allocates more attention to uncertain information.
+
+Cell assemblies (hyperedges) enable group-level memory: when one member of an assembly activates during retrieval, all members receive co-activation spread — just as Hebbian ensembles fire as coordinated units. The MCP knowledge server exposes `query_graph`, `get_neighbors`, `list_communities`, `find_hubs`, `find_bridges`, and `get_assemblies` as agent-callable tools, enabling metacognitive self-inspection.
 
 ---
 
@@ -226,6 +249,7 @@ brain-agent dashboard --port 3000
 - 25+ anatomical neural connections
 - HUD with network mode and 6 neurotransmitter bars
 - Memory flow pipeline with live counts
+- Knowledge graph visualization with community coloring, hub highlighting, and confidence-based edges
 - Audio input with voice mode
 - Multimodal input (image, audio, text)
 
@@ -241,7 +265,7 @@ CBA/
 │   ├── config/               # Pydantic configuration
 │   ├── core/                 # Signals, neuromodulators, router
 │   ├── regions/              # 23 brain regions
-│   ├── memory/               # 6-layer memory system
+│   ├── memory/               # 6-layer memory system + graph analysis
 │   ├── providers/            # LLM provider (LiteLLM)
 │   ├── dashboard/            # FastAPI WebSocket server
 │   ├── tools/                # Tool registry
@@ -269,6 +293,7 @@ pytest --cov            # With coverage
 | Branch | Description |
 |--------|-------------|
 | `main` | Stable release |
+| `graphify` | Knowledge graph analysis: Leiden clustering, cell assemblies, MCP metacognition, dashboard viz |
 | `openclaw` | Extended features: MCP, tool system, middleware |
 
 ---
@@ -375,6 +400,23 @@ This framework is grounded in **50+ published neuroscience papers** spanning 192
 | Schneider & Shiffrin (1977) | Automatic vs controlled processing | Pipeline |
 | Lamme (2006) | Recurrent processing and consciousness | Pipeline |
 | Rolls (2013) | Pattern completion in CA3 | Retrieval Engine |
+
+### Graph Analysis & Connectomics
+
+| Citation | Topic | System |
+|----------|-------|--------|
+| Green & Swets (1966) | Signal Detection Theory | Confidence Scoring |
+| Miller (1956) | Chunking and working memory capacity | Compressed Context |
+| Bliss & Lomo (1973) | Long-term potentiation | Graph Diff (LTP) |
+| Huttenlocher (1979) | Synaptic pruning during development | Graph Diff (pruning) |
+| Mountcastle (1997) | Cortical column modularity | Leiden Community Detection |
+| Watts & Strogatz (1998) | Small-world network topology | Knowledge Graph |
+| van den Heuvel & Sporns (2011) | Rich-club organization in brain networks | Hub Concept Detection |
+| Frankland & Bontempi (2005) | Systems consolidation | Leiden-based Consolidation |
+| Reyna & Brainerd (1995) | Fuzzy-trace theory (gist extraction) | Compressed Context |
+| Hebb (1949) | Cell Assembly theory | Hyperedges / Co-activation |
+| Flavell (1979) | Metacognition | MCP Knowledge Server |
+| Collins & Loftus (1975) | Spreading activation | Community-aware retrieval |
 
 ---
 

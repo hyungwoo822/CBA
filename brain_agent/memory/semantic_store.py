@@ -6,6 +6,7 @@ from typing import Callable
 
 import aiosqlite
 import chromadb
+import networkx as nx
 
 
 class SemanticStore:
@@ -37,6 +38,7 @@ class SemanticStore:
                 relation TEXT NOT NULL,
                 target_node TEXT NOT NULL,
                 category TEXT DEFAULT 'GENERAL',
+                confidence TEXT DEFAULT 'INFERRED',
                 weight REAL DEFAULT 0.5,
                 occurrence_count INTEGER DEFAULT 1,
                 first_seen TEXT NOT NULL DEFAULT '',
@@ -54,6 +56,7 @@ class SemanticStore:
         # Migration for existing DBs: add new columns silently if missing
         for col, defn in [
             ("category", "TEXT DEFAULT 'GENERAL'"),
+            ("confidence", "TEXT DEFAULT 'INFERRED'"),
             ("occurrence_count", "INTEGER DEFAULT 1"),
             ("first_seen", "TEXT NOT NULL DEFAULT ''"),
             ("last_seen", "TEXT NOT NULL DEFAULT ''"),
@@ -103,6 +106,16 @@ class SemanticStore:
                 confidence REAL DEFAULT 1.0,
                 updated_at TEXT DEFAULT '',
                 UNIQUE(fact_type, key)
+            )"""
+        )
+        await self._graph_db.execute(
+            """CREATE TABLE IF NOT EXISTS hyperedges(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                label TEXT NOT NULL UNIQUE,
+                members TEXT NOT NULL,
+                category TEXT DEFAULT 'GENERAL',
+                strength REAL DEFAULT 1.0,
+                created_at TEXT
             )"""
         )
         await self._graph_db.commit()
@@ -215,14 +228,15 @@ class SemanticStore:
         target: str,
         weight: float = 0.5,
         category: str = "GENERAL",
+        confidence: str = "INFERRED",
         origin: str = "unknown",
     ):
         now = datetime.now(timezone.utc).isoformat()
         await self._graph_db.execute(
             """INSERT INTO knowledge_graph
-               (id, source_node, relation, target_node, category, weight,
+               (id, source_node, relation, target_node, category, confidence, weight,
                 occurrence_count, first_seen, last_seen, origin)
-               VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                ON CONFLICT(source_node, relation, target_node, origin) DO UPDATE SET
                    weight = MIN(1.0, MAX(excluded.weight, knowledge_graph.weight)
                             + 0.1 / (1.0 + knowledge_graph.occurrence_count * 0.5)),
@@ -231,14 +245,15 @@ class SemanticStore:
                    category = CASE
                        WHEN excluded.category != 'GENERAL' THEN excluded.category
                        ELSE knowledge_graph.category
-                   END""",
-            (str(uuid.uuid4()), source, relation, target, category, weight, now, now, origin),
+                   END,
+                   confidence = excluded.confidence""",
+            (str(uuid.uuid4()), source, relation, target, category, confidence, weight, now, now, origin),
         )
         await self._graph_db.commit()
 
     async def get_relationships(self, node: str) -> list[dict]:
         async with self._graph_db.execute(
-            "SELECT source_node, relation, target_node, weight, category, occurrence_count, origin "
+            "SELECT source_node, relation, target_node, weight, category, occurrence_count, origin, confidence "
             "FROM knowledge_graph WHERE source_node = ? OR target_node = ?",
             (node, node),
         ) as cursor:
@@ -252,6 +267,7 @@ class SemanticStore:
                     "category": r[4],
                     "occurrence_count": r[5],
                     "origin": r[6] if len(r) > 6 else "unknown",
+                    "confidence": r[7] if len(r) > 7 else "INFERRED",
                 }
                 for r in rows
             ]
@@ -432,9 +448,50 @@ class SemanticStore:
         start_nodes: list[str],
         max_hops: int = 3,
         decay: float = 0.85,
+        community_bonus: float = 0.15,
     ) -> dict[str, float]:
+        """Spread activation through knowledge graph with community awareness.
+
+        Neuroscience: spreading activation (Collins & Loftus 1975) enhanced
+        with cortical column affinity — nodes in the same community as start
+        nodes receive a small activation bonus, reflecting intra-region
+        facilitation in the brain.
+
+        Args:
+            start_nodes: Seed concept nodes.
+            max_hops: Maximum traversal depth.
+            decay: Per-hop decay factor.
+            community_bonus: Extra activation for same-community neighbors.
+        """
+        # Pre-compute community membership for bonus
+        community_map: dict[str, int] = {}
+        start_communities: set[int] = set()
+        try:
+            comms = await self.cluster_knowledge()
+            for cid, members in comms.items():
+                for m in members:
+                    community_map[m] = cid
+            start_communities = {community_map[n] for n in start_nodes if n in community_map}
+        except Exception:
+            pass  # graceful degradation: no community bonus if clustering fails
+
+        # Assembly co-activation: boost from hyperedges
+        assembly_boost: dict[str, float] = {}
+        try:
+            from brain_agent.memory.graph_analysis import assembly_coactivation
+            assemblies = await self.get_hyperedges()
+            if assemblies:
+                assembly_boost = assembly_coactivation(start_nodes, assemblies)
+        except Exception:
+            pass
+
         activation: dict[str, float] = {}
+        # Seed assembly co-activated nodes into frontier
         frontier = [(n, 1.0) for n in start_nodes]
+        for node, boost in assembly_boost.items():
+            if boost > 0.01:
+                frontier.append((node, boost))
+
         for _ in range(max_hops):
             next_frontier = []
             for node, act in frontier:
@@ -448,7 +505,169 @@ class SemanticStore:
                 for r in rels:
                     neighbor = r["target"] if r["source"] == node else r["source"]
                     spread = act * decay * r["weight"] * fan
+                    # Community bonus: same community as start nodes
+                    if community_bonus > 0 and community_map.get(neighbor) in start_communities:
+                        spread *= (1.0 + community_bonus)
                     if spread > 0.01:
                         next_frontier.append((neighbor, spread))
             frontier = next_frontier
         return activation
+
+    # ------------------------------------------------------------------
+    # NetworkX bridge methods (graph_analysis integration)
+    # ------------------------------------------------------------------
+
+    async def export_as_networkx(self) -> nx.Graph:
+        """Export the knowledge_graph table as a NetworkX Graph.
+
+        Each source and target becomes a node with a ``label`` attribute.
+        Each row becomes an undirected edge carrying relation, weight,
+        category, and confidence attributes.
+        """
+        G = nx.Graph()
+        async with self._graph_db.execute(
+            "SELECT source_node, relation, target_node, weight, category, confidence "
+            "FROM knowledge_graph"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        for source, relation, target, weight, category, confidence in rows:
+            if source not in G:
+                G.add_node(source, label=source)
+            if target not in G:
+                G.add_node(target, label=target)
+            G.add_edge(
+                source,
+                target,
+                relation=relation,
+                weight=weight,
+                category=category,
+                confidence=confidence,
+            )
+        return G
+
+    async def cluster_knowledge(self) -> dict[int, list[str]]:
+        """Cluster the knowledge graph into communities.
+
+        Returns a mapping of community id to list of node ids.
+        """
+        from brain_agent.memory.graph_analysis import cluster_graph
+        G = await self.export_as_networkx()
+        return cluster_graph(G)
+
+    async def find_hub_concepts(self, top_n: int = 10) -> list[dict]:
+        """Return the top-N most-connected concepts in the knowledge graph.
+
+        Each entry: {"id": node_id, "label": label, "edges": degree}.
+        """
+        from brain_agent.memory.graph_analysis import hub_concepts
+        G = await self.export_as_networkx()
+        return hub_concepts(G, top_n)
+
+    async def find_bridges(self, top_n: int = 5) -> list[dict]:
+        """Return the most surprising cross-community edges.
+
+        Clusters the graph first, then scores edges by structural
+        surprise (cross-community, confidence, peripheral-to-hub).
+        """
+        from brain_agent.memory.graph_analysis import cluster_graph, surprising_connections
+        G = await self.export_as_networkx()
+        communities = cluster_graph(G)
+        return surprising_connections(G, communities, top_n)
+
+    # ------------------------------------------------------------------
+    # Hyperedge / Cell Assembly methods (Hebb, 1949)
+    # ------------------------------------------------------------------
+
+    async def add_hyperedge(
+        self, members: list[str], label: str,
+        category: str = "GENERAL", strength: float = 1.0,
+    ) -> None:
+        """Add a cell assembly (hyperedge) connecting 3+ concepts.
+
+        Neuroscience: Hebb's Cell Assembly (1949) — neurons that fire
+        together wire together. Hyperedges represent group-level
+        activation patterns beyond pairwise connections.
+        """
+        import json
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
+        members_json = json.dumps(sorted(members))
+        async with aiosqlite.connect(self._graph_db_path) as db:
+            await db.execute(
+                """INSERT INTO hyperedges (label, members, category, strength, created_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(label) DO UPDATE SET
+                     members = excluded.members,
+                     category = excluded.category,
+                     strength = excluded.strength
+                """,
+                (label, members_json, category, strength, now),
+            )
+            await db.commit()
+
+    async def get_hyperedges(self) -> list[dict]:
+        """Return all cell assemblies."""
+        import json
+        async with aiosqlite.connect(self._graph_db_path) as db:
+            cursor = await db.execute(
+                "SELECT label, members, category, strength, created_at FROM hyperedges"
+            )
+            rows = await cursor.fetchall()
+        return [
+            {
+                "label": r[0],
+                "members": json.loads(r[1]),
+                "category": r[2],
+                "strength": r[3],
+                "created_at": r[4],
+            }
+            for r in rows
+        ]
+
+    async def get_assemblies_for_node(self, node: str) -> list[dict]:
+        """Return all cell assemblies containing a given node."""
+        all_edges = await self.get_hyperedges()
+        return [e for e in all_edges if node in e["members"]]
+
+    # ------------------------------------------------------------------
+    # Synaptic pruning & homeostatic scaling (Huttenlocher 1979;
+    # Tononi & Cirelli 2003)
+    # ------------------------------------------------------------------
+
+    async def prune_weak_edges(self, min_weight: float = 0.1) -> int:
+        """Remove knowledge graph edges below the weight threshold.
+
+        Neuroscience: synaptic pruning (Huttenlocher 1979) — weak
+        connections are eliminated to maintain efficient network topology.
+        Runs during homeostatic scaling in consolidation.
+
+        Returns the number of pruned edges.
+        """
+        async with self._graph_db.execute(
+            "SELECT COUNT(*) FROM knowledge_graph WHERE weight < ?",
+            (min_weight,),
+        ) as cursor:
+            count = (await cursor.fetchone())[0]
+        if count > 0:
+            await self._graph_db.execute(
+                "DELETE FROM knowledge_graph WHERE weight < ?",
+                (min_weight,),
+            )
+            await self._graph_db.commit()
+        return count
+
+    async def decay_edge_weights(self, factor: float = 0.95) -> int:
+        """Apply homeostatic scaling to all knowledge graph edges.
+
+        Neuroscience: synaptic homeostasis (Tononi & Cirelli 2003).
+        Scales all weights down by factor, simulating global synaptic
+        downscaling during consolidation ("sleep").
+
+        Returns the number of affected edges.
+        """
+        cursor = await self._graph_db.execute(
+            "UPDATE knowledge_graph SET weight = weight * ?",
+            (factor,),
+        )
+        await self._graph_db.commit()
+        return cursor.rowcount

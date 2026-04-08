@@ -54,8 +54,34 @@ def test_relevance_has_highest_weight():
 
 def test_config_weights_sum_to_one():
     cfg = RetrievalConfig()
-    total = cfg.alpha + cfg.beta + cfg.gamma + cfg.delta + cfg.epsilon + cfg.zeta
+    total = cfg.alpha + cfg.beta + cfg.gamma + cfg.delta + cfg.epsilon + cfg.zeta + cfg.eta
     assert abs(total - 1.0) < 0.001
+
+
+def test_confidence_bonus_increases_score():
+    engine = RetrievalEngine()
+    base = engine.compute_score(
+        recency_distance=5.0, relevance=0.5, importance=0.3,
+        access_count=1, context_similarity=0.5,
+    )
+    boosted = engine.compute_score(
+        recency_distance=5.0, relevance=0.5, importance=0.3,
+        access_count=1, context_similarity=0.5, confidence_bonus=0.8,
+    )
+    assert boosted > base
+
+
+def test_ambiguous_confidence_penalty():
+    engine = RetrievalEngine()
+    extracted = engine.compute_score(
+        recency_distance=5.0, relevance=0.5, importance=0.3,
+        access_count=1, context_similarity=0.5, confidence_bonus=1.0,
+    )
+    ambiguous = engine.compute_score(
+        recency_distance=5.0, relevance=0.5, importance=0.3,
+        access_count=1, context_similarity=0.5, confidence_bonus=0.3,
+    )
+    assert extracted > ambiguous
 
 
 def test_activation_boost_increases_score():

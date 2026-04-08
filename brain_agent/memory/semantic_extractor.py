@@ -61,6 +61,55 @@ def find_episode_clusters(
     return clusters
 
 
+def find_episode_clusters_leiden(
+    episodes: list[dict],
+    similarity_fn: Callable[[list[float], list[float]], float],
+    threshold: float = CLUSTER_SIMILARITY_THRESHOLD,
+    min_size: int = MIN_CLUSTER_SIZE,
+) -> list[list[dict]]:
+    """Cluster episodes using Leiden community detection on similarity graph.
+
+    Neuroscience: systems consolidation (Frankland & Bontempi 2005).
+    Falls back to greedy single-linkage if networkx is not available.
+    """
+    if len(episodes) < min_size:
+        return []
+
+    valid = [(i, ep) for i, ep in enumerate(episodes) if ep.get("context_embedding")]
+    if len(valid) < min_size:
+        return find_episode_clusters(episodes, similarity_fn, threshold, min_size)
+
+    try:
+        import networkx as nx
+        from brain_agent.memory.graph_analysis import cluster_graph
+    except ImportError:
+        return find_episode_clusters(episodes, similarity_fn, threshold, min_size)
+
+    G = nx.Graph()
+    for i, ep in valid:
+        G.add_node(i)
+
+    for idx_a in range(len(valid)):
+        i_a, ep_a = valid[idx_a]
+        for idx_b in range(idx_a + 1, len(valid)):
+            i_b, ep_b = valid[idx_b]
+            sim = similarity_fn(ep_a["context_embedding"], ep_b["context_embedding"])
+            if sim >= threshold:
+                G.add_edge(i_a, i_b, weight=sim)
+
+    comms = cluster_graph(G)
+    clusters = []
+    for nodes in comms.values():
+        cluster = [episodes[n] for n in nodes]
+        if len(cluster) >= min_size:
+            clusters.append(cluster)
+
+    if not clusters:
+        return find_episode_clusters(episodes, similarity_fn, threshold, min_size)
+
+    return clusters
+
+
 def build_extraction_prompt(cluster: list[dict]) -> str:
     """Build a prompt for PFC to extract a semantic fact from an episode cluster."""
     contents = "\n".join(f"- {ep['content']}" for ep in cluster)

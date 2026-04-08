@@ -57,6 +57,16 @@ class ProceduralStore:
         action_sequence: list[dict],
         strategy: str = "",
     ) -> str:
+        """Save or update a procedure. Deduplicates by trigger_pattern + strategy.
+
+        If a procedure with the same trigger and strategy already exists,
+        returns its existing ID instead of creating a duplicate.
+        """
+        # Check for existing duplicate
+        existing = await self._find_by_trigger_strategy(trigger_pattern, strategy)
+        if existing:
+            return existing["id"]
+
         proc_id = str(uuid.uuid4())
         await self._db.execute(
             "INSERT INTO procedures (id, trigger_pattern, action_sequence, strategy) VALUES (?, ?, ?, ?)",
@@ -64,6 +74,48 @@ class ProceduralStore:
         )
         await self._db.commit()
         return proc_id
+
+    async def _find_by_trigger_strategy(self, trigger: str, strategy: str) -> dict | None:
+        """Find an existing procedure by trigger_pattern + strategy."""
+        async with self._db.execute(
+            "SELECT * FROM procedures WHERE trigger_pattern = ? AND strategy = ?",
+            (trigger, strategy),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return self._row_to_dict(cursor.description, row) if row else None
+
+    async def deduplicate(self) -> int:
+        """Remove duplicate procedures, keeping the one with highest execution_count.
+
+        Returns the number of duplicates removed.
+        """
+        # Find groups with same trigger+strategy
+        async with self._db.execute(
+            """SELECT trigger_pattern, strategy, COUNT(*) as cnt
+               FROM procedures
+               GROUP BY trigger_pattern, strategy
+               HAVING cnt > 1"""
+        ) as cursor:
+            dupes = await cursor.fetchall()
+
+        removed = 0
+        for trigger, strategy, count in dupes:
+            async with self._db.execute(
+                """SELECT id, execution_count FROM procedures
+                   WHERE trigger_pattern = ? AND strategy = ?
+                   ORDER BY execution_count DESC""",
+                (trigger, strategy),
+            ) as cursor:
+                rows = await cursor.fetchall()
+            # Keep the first (highest execution_count), delete the rest
+            ids_to_delete = [r[0] for r in rows[1:]]
+            for pid in ids_to_delete:
+                await self._db.execute("DELETE FROM procedures WHERE id = ?", (pid,))
+                removed += 1
+
+        if removed:
+            await self._db.commit()
+        return removed
 
     async def get_all(self) -> list[dict]:
         """Return all stored procedures."""

@@ -58,3 +58,8 @@ desktop.ini
 .server-stopped
 .server.log
 .server.pid
+
+# graphify (reference only, not pushed)
+graphify/
+graphify.md
+openclaw/

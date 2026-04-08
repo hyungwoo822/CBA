@@ -2,7 +2,6 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useBrainStore } from '../stores/brainState'
 import { useDraggable } from '../hooks/useDraggable'
 import ForceGraph2D from 'react-force-graph-2d'
-
 const TABS = ['Chat', 'Working', 'Staging', 'Episodic', 'Semantic', 'Procedural'] as const
 type Tab = typeof TABS[number]
 
@@ -29,6 +28,7 @@ export function MemoryPanel() {
 
   const [tab, setTab] = useState<Tab>('Chat')
   const { pos, onMouseDown: onDragMouseDown } = useDraggable('memory-panel', window.innerWidth - 390, 82)
+  const bodyRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     (window as any).__memoryPanelSetTab = (t: Tab) => {
@@ -61,7 +61,7 @@ export function MemoryPanel() {
           </button>
         ))}
       </div>
-      <div className="mp-body">
+      <div className="mp-body" ref={bodyRef}>
         {tab === 'Chat' && <ChatTab />}
         {tab === 'Working' && <WorkingTab />}
         {tab === 'Staging' && <StagingTab />}
