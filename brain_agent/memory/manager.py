@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import os
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import networkx as nx
 
 import numpy as np
 
@@ -546,6 +549,13 @@ class MemoryManager:
             "semantic": await self.semantic.count(),
             "procedural": proc_count,
         }
+
+    async def snapshot_graph(self) -> "nx.Graph":
+        """Take a snapshot of the current knowledge graph as NetworkX.
+
+        Used for graph_diff at session boundaries to track neuroplasticity.
+        """
+        return await self.semantic.export_as_networkx()
 
     # ------------------------------------------------------------------
     # Helpers

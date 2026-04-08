@@ -267,3 +267,60 @@ def surprising_connections(
             "why": "; ".join(why_parts),
         })
     return results
+
+
+def graph_diff(G_old: nx.Graph, G_new: nx.Graph) -> dict:
+    """Compare two graph snapshots. Returns neuroplasticity-classified changes.
+
+    Neuroscience mapping:
+    - ltp (new nodes): Long-Term Potentiation — new synaptic connections
+    - ltd (removed nodes): Long-Term Depression — weakened/lost connections
+    - new_synapses (new edges): synaptogenesis
+    - pruned_synapses (removed edges): synaptic pruning (Huttenlocher 1979)
+    """
+    old_nodes = set(G_old.nodes())
+    new_nodes = set(G_new.nodes())
+
+    ltp = [
+        {"id": n, "label": G_new.nodes[n].get("label", n)}
+        for n in sorted(new_nodes - old_nodes)
+    ]
+    ltd = [
+        {"id": n, "label": G_old.nodes[n].get("label", n)}
+        for n in sorted(old_nodes - new_nodes)
+    ]
+
+    def _edge_key(u: str, v: str, data: dict) -> tuple:
+        return (min(u, v), max(u, v), data.get("relation", ""))
+
+    old_edges = {_edge_key(u, v, d) for u, v, d in G_old.edges(data=True)}
+    new_edges = {_edge_key(u, v, d) for u, v, d in G_new.edges(data=True)}
+
+    new_synapses = []
+    for u, v, d in G_new.edges(data=True):
+        if _edge_key(u, v, d) in (new_edges - old_edges):
+            new_synapses.append({"source": u, "target": v, "relation": d.get("relation", "")})
+
+    pruned_synapses = []
+    for u, v, d in G_old.edges(data=True):
+        if _edge_key(u, v, d) in (old_edges - new_edges):
+            pruned_synapses.append({"source": u, "target": v, "relation": d.get("relation", "")})
+
+    parts = []
+    if ltp:
+        parts.append(f"{len(ltp)} ltp (new concepts)")
+    if ltd:
+        parts.append(f"{len(ltd)} ltd (lost concepts)")
+    if new_synapses:
+        parts.append(f"{len(new_synapses)} new synapses")
+    if pruned_synapses:
+        parts.append(f"{len(pruned_synapses)} pruned synapses")
+    summary = ", ".join(parts) if parts else "no changes"
+
+    return {
+        "ltp": ltp,
+        "ltd": ltd,
+        "new_synapses": new_synapses,
+        "pruned_synapses": pruned_synapses,
+        "summary": summary,
+    }

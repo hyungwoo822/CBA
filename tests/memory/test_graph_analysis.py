@@ -13,6 +13,7 @@ from brain_agent.memory.graph_analysis import (
     cohesion_scores,
     hub_concepts,
     surprising_connections,
+    graph_diff,
 )
 
 
@@ -248,3 +249,45 @@ def test_surprising_connections_returns_top_n():
     communities = cluster_graph(G)
     surprises = surprising_connections(G, communities, top_n=2)
     assert len(surprises) <= 2
+
+
+# ---------------------------------------------------------------------------
+# Graph diff (neuroplasticity) tests
+# ---------------------------------------------------------------------------
+
+
+def test_graph_diff_no_changes():
+    G = _triangle_graph()
+    diff = graph_diff(G, G)
+    assert diff["summary"] == "no changes"
+    assert diff["ltp"] == []
+    assert diff["ltd"] == []
+
+
+def test_graph_diff_new_node():
+    G_old = _triangle_graph()
+    G_new = _triangle_graph()
+    G_new.add_node("d", label="d")
+    G_new.add_edge("c", "d")
+    diff = graph_diff(G_old, G_new)
+    assert len(diff["ltp"]) == 1
+    assert diff["ltp"][0]["id"] == "d"
+    assert len(diff["new_synapses"]) == 1
+
+
+def test_graph_diff_removed_node():
+    G_old = _triangle_graph()
+    G_old.add_node("d", label="d")
+    G_new = _triangle_graph()
+    diff = graph_diff(G_old, G_new)
+    assert len(diff["ltd"]) == 1
+    assert diff["ltd"][0]["id"] == "d"
+
+
+def test_graph_diff_summary():
+    G_old = nx.Graph()
+    G_old.add_edges_from([("a", "b"), ("b", "c")])
+    G_new = nx.Graph()
+    G_new.add_edges_from([("a", "b"), ("c", "d")])
+    diff = graph_diff(G_old, G_new)
+    assert "no changes" not in diff["summary"]
