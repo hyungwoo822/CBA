@@ -324,3 +324,35 @@ def graph_diff(G_old: nx.Graph, G_new: nx.Graph) -> dict:
         "pruned_synapses": pruned_synapses,
         "summary": summary,
     }
+
+
+def assembly_coactivation(
+    active_nodes: list[str],
+    assemblies: list[dict],
+    decay: float = 0.7,
+) -> dict[str, float]:
+    """Co-activate assembly members when any member is active.
+
+    Neuroscience: Hebb's Cell Assembly (1949). Neurons that fire
+    together wire together — activating one member triggers the ensemble.
+
+    Args:
+        active_nodes: Currently active concept nodes.
+        assemblies: List of dicts with "members" (list[str]) and "strength" (float).
+        decay: Activation spread factor (0-1).
+
+    Returns:
+        Dict mapping inactive member nodes to their co-activation level.
+    """
+    activation: dict[str, float] = {}
+    active_set = set(active_nodes)
+    for assembly in assemblies:
+        members = set(assembly.get("members", []))
+        overlap = members & active_set
+        if not overlap:
+            continue
+        strength = assembly.get("strength", 1.0)
+        spread = strength * decay * (len(overlap) / len(members))
+        for member in members - active_set:
+            activation[member] = max(activation.get(member, 0.0), spread)
+    return activation

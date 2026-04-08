@@ -14,6 +14,7 @@ from brain_agent.memory.graph_analysis import (
     hub_concepts,
     surprising_connections,
     graph_diff,
+    assembly_coactivation,
 )
 
 
@@ -291,3 +292,38 @@ def test_graph_diff_summary():
     G_new.add_edges_from([("a", "b"), ("c", "d")])
     diff = graph_diff(G_old, G_new)
     assert "no changes" not in diff["summary"]
+
+
+# ---------------------------------------------------------------------------
+# Assembly co-activation tests
+# ---------------------------------------------------------------------------
+
+
+def test_assembly_coactivation():
+    assemblies = [
+        {"members": ["A", "B", "C"], "label": "cluster1", "strength": 1.0},
+        {"members": ["B", "D", "E"], "label": "cluster2", "strength": 0.8},
+    ]
+    activated = assembly_coactivation(["B"], assemblies)
+    assert "A" in activated
+    assert "C" in activated
+    assert "D" in activated
+    assert "E" in activated
+    assert activated["A"] >= activated["D"]
+
+
+def test_assembly_coactivation_no_match():
+    assemblies = [{"members": ["A", "B"], "label": "pair", "strength": 1.0}]
+    activated = assembly_coactivation(["Z"], assemblies)
+    assert activated == {}
+
+
+def test_assembly_coactivation_multiple_overlap():
+    assemblies = [
+        {"members": ["A", "B", "C", "D"], "label": "big", "strength": 1.0},
+    ]
+    # 2 of 4 members active -> higher spread than 1 of 4
+    activated_one = assembly_coactivation(["A"], assemblies)
+    activated_two = assembly_coactivation(["A", "B"], assemblies)
+    # C and D should get more activation when 2 members are active
+    assert activated_two.get("C", 0) > activated_one.get("C", 0)
