@@ -628,3 +628,46 @@ class SemanticStore:
         """Return all cell assemblies containing a given node."""
         all_edges = await self.get_hyperedges()
         return [e for e in all_edges if node in e["members"]]
+
+    # ------------------------------------------------------------------
+    # Synaptic pruning & homeostatic scaling (Huttenlocher 1979;
+    # Tononi & Cirelli 2003)
+    # ------------------------------------------------------------------
+
+    async def prune_weak_edges(self, min_weight: float = 0.1) -> int:
+        """Remove knowledge graph edges below the weight threshold.
+
+        Neuroscience: synaptic pruning (Huttenlocher 1979) — weak
+        connections are eliminated to maintain efficient network topology.
+        Runs during homeostatic scaling in consolidation.
+
+        Returns the number of pruned edges.
+        """
+        async with self._graph_db.execute(
+            "SELECT COUNT(*) FROM knowledge_graph WHERE weight < ?",
+            (min_weight,),
+        ) as cursor:
+            count = (await cursor.fetchone())[0]
+        if count > 0:
+            await self._graph_db.execute(
+                "DELETE FROM knowledge_graph WHERE weight < ?",
+                (min_weight,),
+            )
+            await self._graph_db.commit()
+        return count
+
+    async def decay_edge_weights(self, factor: float = 0.95) -> int:
+        """Apply homeostatic scaling to all knowledge graph edges.
+
+        Neuroscience: synaptic homeostasis (Tononi & Cirelli 2003).
+        Scales all weights down by factor, simulating global synaptic
+        downscaling during consolidation ("sleep").
+
+        Returns the number of affected edges.
+        """
+        cursor = await self._graph_db.execute(
+            "UPDATE knowledge_graph SET weight = weight * ?",
+            (factor,),
+        )
+        await self._graph_db.commit()
+        return cursor.rowcount

@@ -3,6 +3,7 @@ import networkx as nx
 from brain_agent.memory.semantic_store import SemanticStore
 
 
+
 @pytest.fixture
 async def store(tmp_path, mock_embedding):
     s = SemanticStore(
@@ -182,3 +183,30 @@ async def test_spread_activation_with_assemblies(store):
     activated = await store.spread_activation(["X"], max_hops=2, decay=0.85)
     # Z and W should get activation from assembly co-activation
     assert "Z" in activated or "W" in activated
+
+
+async def test_prune_weak_edges(store):
+    await store.add_relationship("a", "r", "b", weight=0.05)
+    await store.add_relationship("c", "r", "d", weight=0.5)
+    pruned = await store.prune_weak_edges(min_weight=0.1)
+    assert pruned == 1
+    rels_a = await store.get_relationships("a")
+    assert len(rels_a) == 0
+    rels_c = await store.get_relationships("c")
+    assert len(rels_c) == 1
+
+
+async def test_decay_edge_weights(store):
+    await store.add_relationship("a", "r", "b", weight=1.0)
+    affected = await store.decay_edge_weights(factor=0.9)
+    assert affected >= 1
+    rels = await store.get_relationships("a")
+    assert rels[0]["weight"] == pytest.approx(0.9, abs=0.01)
+
+
+async def test_prune_after_decay(store):
+    """Decay + prune should remove edges that fall below threshold."""
+    await store.add_relationship("weak", "r", "node", weight=0.12)
+    await store.decay_edge_weights(factor=0.8)  # 0.12 * 0.8 = 0.096
+    pruned = await store.prune_weak_edges(min_weight=0.1)
+    assert pruned == 1

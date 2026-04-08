@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Callable, Awaitable, TYPE_CHECKING
+from typing import Callable, Awaitable, TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -28,6 +28,7 @@ class ConsolidationResult:
     pruned: int = 0
     semantic_extracted: int = 0
     reflections_generated: int = 0
+    knowledge_diff: dict = field(default_factory=dict)
 
 
 class ConsolidationEngine:
@@ -84,6 +85,14 @@ class ConsolidationEngine:
         4. Reflection — generate higher-level insights (Park et al. 2023).
         """
         result = ConsolidationResult()
+
+        # Snapshot knowledge graph before changes for diff tracking
+        graph_before = None
+        if self._semantic:
+            try:
+                graph_before = await self._semantic.export_as_networkx()
+            except Exception:
+                pass
 
         # --- Phase 1: transfer from staging to episodic ---
         # ACh gating (Hasselmo 2006): Low ACh during SWS supports
@@ -145,6 +154,14 @@ class ConsolidationEngine:
 
         if result.pruned > 0:
             await self._episodic.delete_below_strength(PRUNING_THRESHOLD)
+
+        # Edge pruning (synaptic pruning, Huttenlocher 1979)
+        if self._semantic:
+            try:
+                edge_pruned = await self._semantic.prune_weak_edges(min_weight=0.05)
+                result.pruned += edge_pruned
+            except Exception:
+                pass
 
         # --- Phase 3: Episodic→Semantic transition (Winocur & Moscovitch 2011) ---
         if self._pfc_fn and self._semantic:
@@ -218,5 +235,14 @@ class ConsolidationEngine:
                 logger.debug(
                     "Error during reflection phase", exc_info=True,
                 )
+
+        # Compute neuroplasticity diff
+        if self._semantic and graph_before is not None:
+            try:
+                graph_after = await self._semantic.export_as_networkx()
+                from brain_agent.memory.graph_analysis import graph_diff
+                result.knowledge_diff = graph_diff(graph_before, graph_after)
+            except Exception:
+                pass
 
         return result
