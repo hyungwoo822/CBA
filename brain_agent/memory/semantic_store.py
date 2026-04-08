@@ -37,6 +37,7 @@ class SemanticStore:
                 relation TEXT NOT NULL,
                 target_node TEXT NOT NULL,
                 category TEXT DEFAULT 'GENERAL',
+                confidence TEXT DEFAULT 'INFERRED',
                 weight REAL DEFAULT 0.5,
                 occurrence_count INTEGER DEFAULT 1,
                 first_seen TEXT NOT NULL DEFAULT '',
@@ -54,6 +55,7 @@ class SemanticStore:
         # Migration for existing DBs: add new columns silently if missing
         for col, defn in [
             ("category", "TEXT DEFAULT 'GENERAL'"),
+            ("confidence", "TEXT DEFAULT 'INFERRED'"),
             ("occurrence_count", "INTEGER DEFAULT 1"),
             ("first_seen", "TEXT NOT NULL DEFAULT ''"),
             ("last_seen", "TEXT NOT NULL DEFAULT ''"),
@@ -215,14 +217,15 @@ class SemanticStore:
         target: str,
         weight: float = 0.5,
         category: str = "GENERAL",
+        confidence: str = "INFERRED",
         origin: str = "unknown",
     ):
         now = datetime.now(timezone.utc).isoformat()
         await self._graph_db.execute(
             """INSERT INTO knowledge_graph
-               (id, source_node, relation, target_node, category, weight,
+               (id, source_node, relation, target_node, category, confidence, weight,
                 occurrence_count, first_seen, last_seen, origin)
-               VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
                ON CONFLICT(source_node, relation, target_node, origin) DO UPDATE SET
                    weight = MIN(1.0, MAX(excluded.weight, knowledge_graph.weight)
                             + 0.1 / (1.0 + knowledge_graph.occurrence_count * 0.5)),
@@ -231,14 +234,15 @@ class SemanticStore:
                    category = CASE
                        WHEN excluded.category != 'GENERAL' THEN excluded.category
                        ELSE knowledge_graph.category
-                   END""",
-            (str(uuid.uuid4()), source, relation, target, category, weight, now, now, origin),
+                   END,
+                   confidence = excluded.confidence""",
+            (str(uuid.uuid4()), source, relation, target, category, confidence, weight, now, now, origin),
         )
         await self._graph_db.commit()
 
     async def get_relationships(self, node: str) -> list[dict]:
         async with self._graph_db.execute(
-            "SELECT source_node, relation, target_node, weight, category, occurrence_count, origin "
+            "SELECT source_node, relation, target_node, weight, category, occurrence_count, origin, confidence "
             "FROM knowledge_graph WHERE source_node = ? OR target_node = ?",
             (node, node),
         ) as cursor:
@@ -252,6 +256,7 @@ class SemanticStore:
                     "category": r[4],
                     "occurrence_count": r[5],
                     "origin": r[6] if len(r) > 6 else "unknown",
+                    "confidence": r[7] if len(r) > 7 else "INFERRED",
                 }
                 for r in rows
             ]

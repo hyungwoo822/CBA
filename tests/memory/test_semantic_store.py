@@ -90,3 +90,27 @@ async def test_spread_activation_bidirectional(store):
     activated = await store.spread_activation(start_nodes=["caffeine"], max_hops=2, decay=0.85)
     assert "coffee" in activated
     assert "tea" in activated
+
+
+async def test_add_relationship_with_confidence(store):
+    await store.add_relationship(
+        "attention", "implements", "transformer",
+        weight=0.9, category="CAUSAL", confidence="EXTRACTED",
+    )
+    rels = await store.get_relationships("attention")
+    assert len(rels) == 1
+    assert rels[0]["confidence"] == "EXTRACTED"
+
+
+async def test_add_relationship_default_confidence(store):
+    await store.add_relationship("a", "relates", "b", weight=0.5)
+    rels = await store.get_relationships("a")
+    assert rels[0]["confidence"] == "INFERRED"
+
+
+async def test_add_relationship_ambiguous(store):
+    await store.add_relationship(
+        "x", "maybe_causes", "y", weight=0.3, confidence="AMBIGUOUS",
+    )
+    rels = await store.get_relationships("x")
+    assert rels[0]["confidence"] == "AMBIGUOUS"
