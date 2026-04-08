@@ -1,4 +1,5 @@
 import pytest
+import networkx as nx
 from brain_agent.memory.semantic_store import SemanticStore
 
 
@@ -114,3 +115,48 @@ async def test_add_relationship_ambiguous(store):
     )
     rels = await store.get_relationships("x")
     assert rels[0]["confidence"] == "AMBIGUOUS"
+
+
+async def test_export_as_networkx(store):
+    await store.add_relationship("Python", "is_a", "Language", weight=0.9)
+    await store.add_relationship("Language", "used_for", "Communication", weight=0.8)
+    G = await store.export_as_networkx()
+    assert isinstance(G, nx.Graph)
+    assert G.number_of_nodes() == 3
+    assert G.number_of_edges() == 2
+    assert G.nodes["Python"]["label"] == "Python"
+
+
+async def test_export_empty_graph(store):
+    G = await store.export_as_networkx()
+    assert G.number_of_nodes() == 0
+
+
+async def test_cluster_knowledge(store):
+    await store.add_relationship("a", "r1", "b", weight=0.9)
+    await store.add_relationship("b", "r2", "c", weight=0.8)
+    await store.add_relationship("a", "r3", "c", weight=0.7)
+    comms = await store.cluster_knowledge()
+    assert isinstance(comms, dict)
+    all_nodes = {n for nodes in comms.values() for n in nodes}
+    assert "a" in all_nodes
+
+
+async def test_find_hub_concepts(store):
+    for i in range(5):
+        await store.add_relationship("hub", f"r{i}", f"leaf_{i}", weight=0.8)
+    hubs = await store.find_hub_concepts(top_n=3)
+    assert len(hubs) >= 1
+    assert hubs[0]["id"] == "hub"
+
+
+async def test_find_bridges(store):
+    await store.add_relationship("a", "r1", "b", weight=0.9)
+    await store.add_relationship("b", "r2", "c", weight=0.8)
+    await store.add_relationship("a", "r3", "c", weight=0.7)
+    await store.add_relationship("d", "r4", "e", weight=0.9)
+    await store.add_relationship("e", "r5", "f", weight=0.8)
+    await store.add_relationship("d", "r6", "f", weight=0.7)
+    await store.add_relationship("c", "bridge", "d", weight=0.5)
+    bridges = await store.find_bridges(top_n=3)
+    assert isinstance(bridges, list)

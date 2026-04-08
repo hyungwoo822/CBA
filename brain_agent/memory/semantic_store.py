@@ -6,6 +6,7 @@ from typing import Callable
 
 import aiosqlite
 import chromadb
+import networkx as nx
 
 
 class SemanticStore:
@@ -457,3 +458,64 @@ class SemanticStore:
                         next_frontier.append((neighbor, spread))
             frontier = next_frontier
         return activation
+
+    # ------------------------------------------------------------------
+    # NetworkX bridge methods (graph_analysis integration)
+    # ------------------------------------------------------------------
+
+    async def export_as_networkx(self) -> nx.Graph:
+        """Export the knowledge_graph table as a NetworkX Graph.
+
+        Each source and target becomes a node with a ``label`` attribute.
+        Each row becomes an undirected edge carrying relation, weight,
+        category, and confidence attributes.
+        """
+        G = nx.Graph()
+        async with self._graph_db.execute(
+            "SELECT source_node, relation, target_node, weight, category, confidence "
+            "FROM knowledge_graph"
+        ) as cursor:
+            rows = await cursor.fetchall()
+        for source, relation, target, weight, category, confidence in rows:
+            if source not in G:
+                G.add_node(source, label=source)
+            if target not in G:
+                G.add_node(target, label=target)
+            G.add_edge(
+                source,
+                target,
+                relation=relation,
+                weight=weight,
+                category=category,
+                confidence=confidence,
+            )
+        return G
+
+    async def cluster_knowledge(self) -> dict[int, list[str]]:
+        """Cluster the knowledge graph into communities.
+
+        Returns a mapping of community id to list of node ids.
+        """
+        from brain_agent.memory.graph_analysis import cluster_graph
+        G = await self.export_as_networkx()
+        return cluster_graph(G)
+
+    async def find_hub_concepts(self, top_n: int = 10) -> list[dict]:
+        """Return the top-N most-connected concepts in the knowledge graph.
+
+        Each entry: {"id": node_id, "label": label, "edges": degree}.
+        """
+        from brain_agent.memory.graph_analysis import hub_concepts
+        G = await self.export_as_networkx()
+        return hub_concepts(G, top_n)
+
+    async def find_bridges(self, top_n: int = 5) -> list[dict]:
+        """Return the most surprising cross-community edges.
+
+        Clusters the graph first, then scores edges by structural
+        surprise (cross-community, confidence, peripheral-to-hub).
+        """
+        from brain_agent.memory.graph_analysis import cluster_graph, surprising_connections
+        G = await self.export_as_networkx()
+        communities = cluster_graph(G)
+        return surprising_connections(G, communities, top_n)
