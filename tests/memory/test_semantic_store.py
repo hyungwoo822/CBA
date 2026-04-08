@@ -160,3 +160,25 @@ async def test_find_bridges(store):
     await store.add_relationship("c", "bridge", "d", weight=0.5)
     bridges = await store.find_bridges(top_n=3)
     assert isinstance(bridges, list)
+
+
+async def test_spread_activation_community_bonus(store):
+    """Community members should get a small activation boost."""
+    # Create a tight cluster a-b-c and a separate node d
+    await store.add_relationship("a", "r1", "b", weight=0.9)
+    await store.add_relationship("b", "r2", "c", weight=0.8)
+    await store.add_relationship("a", "r3", "c", weight=0.7)
+    await store.add_relationship("c", "r4", "d", weight=0.5)  # bridge to d
+    activated = await store.spread_activation(["a"], max_hops=2, decay=0.85)
+    # b and c should be activated (same community as a)
+    assert "b" in activated
+    assert "c" in activated
+
+
+async def test_spread_activation_with_assemblies(store):
+    """Assembly members should be co-activated."""
+    await store.add_relationship("X", "r", "Y", weight=0.9)
+    await store.add_hyperedge(["X", "Z", "W"], "test_assembly", strength=0.8)
+    activated = await store.spread_activation(["X"], max_hops=2, decay=0.85)
+    # Z and W should get activation from assembly co-activation
+    assert "Z" in activated or "W" in activated

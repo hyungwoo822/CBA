@@ -448,9 +448,50 @@ class SemanticStore:
         start_nodes: list[str],
         max_hops: int = 3,
         decay: float = 0.85,
+        community_bonus: float = 0.15,
     ) -> dict[str, float]:
+        """Spread activation through knowledge graph with community awareness.
+
+        Neuroscience: spreading activation (Collins & Loftus 1975) enhanced
+        with cortical column affinity — nodes in the same community as start
+        nodes receive a small activation bonus, reflecting intra-region
+        facilitation in the brain.
+
+        Args:
+            start_nodes: Seed concept nodes.
+            max_hops: Maximum traversal depth.
+            decay: Per-hop decay factor.
+            community_bonus: Extra activation for same-community neighbors.
+        """
+        # Pre-compute community membership for bonus
+        community_map: dict[str, int] = {}
+        start_communities: set[int] = set()
+        try:
+            comms = await self.cluster_knowledge()
+            for cid, members in comms.items():
+                for m in members:
+                    community_map[m] = cid
+            start_communities = {community_map[n] for n in start_nodes if n in community_map}
+        except Exception:
+            pass  # graceful degradation: no community bonus if clustering fails
+
+        # Assembly co-activation: boost from hyperedges
+        assembly_boost: dict[str, float] = {}
+        try:
+            from brain_agent.memory.graph_analysis import assembly_coactivation
+            assemblies = await self.get_hyperedges()
+            if assemblies:
+                assembly_boost = assembly_coactivation(start_nodes, assemblies)
+        except Exception:
+            pass
+
         activation: dict[str, float] = {}
+        # Seed assembly co-activated nodes into frontier
         frontier = [(n, 1.0) for n in start_nodes]
+        for node, boost in assembly_boost.items():
+            if boost > 0.01:
+                frontier.append((node, boost))
+
         for _ in range(max_hops):
             next_frontier = []
             for node, act in frontier:
@@ -464,6 +505,9 @@ class SemanticStore:
                 for r in rels:
                     neighbor = r["target"] if r["source"] == node else r["source"]
                     spread = act * decay * r["weight"] * fan
+                    # Community bonus: same community as start nodes
+                    if community_bonus > 0 and community_map.get(neighbor) in start_communities:
+                        spread *= (1.0 + community_bonus)
                     if spread > 0.01:
                         next_frontier.append((neighbor, spread))
             frontier = next_frontier
