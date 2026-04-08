@@ -584,6 +584,19 @@ class MemoryManager:
                     source, relation, target, weight=weight, category=category
                 )
 
+    async def add_assembly(
+        self, members: list[str], label: str,
+        category: str = "GENERAL", strength: float = 1.0,
+    ) -> None:
+        """Add a cell assembly (hyperedge) to semantic memory."""
+        await self.semantic.add_hyperedge(members, label, category, strength)
+
+    async def get_assemblies(self, node: str | None = None) -> list[dict]:
+        """Get cell assemblies, optionally filtered by node membership."""
+        if node:
+            return await self.semantic.get_assemblies_for_node(node)
+        return await self.semantic.get_hyperedges()
+
     async def match_procedure(self, input_text: str) -> dict | None:
         """Check procedural store for a cached action sequence."""
         return await self.procedural.match(input_text)
