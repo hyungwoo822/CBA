@@ -257,6 +257,26 @@ class NeuromodulatorController:
         else:
             self.neuromodulators.cortisol += CORT_FAILURE_GAIN
 
+    def on_knowledge_confidence(self, confidence: str) -> None:
+        """Knowledge confidence level → NE + ACh modulation.
+
+        Uncertain knowledge demands more attention and learning:
+          AMBIGUOUS: NE spike (uncertainty demands attention) + ACh boost (need to learn)
+          INFERRED:  small ACh boost (moderate uncertainty)
+          EXTRACTED: no modulation (high-confidence knowledge)
+
+        References:
+          - Green & Swets (1966): Signal Detection Theory — uncertainty signals
+          - Aston-Jones & Cohen (2005): NE responds to uncertain/conflicting inputs
+          - Hasselmo (2006): ACh promotes learning under uncertainty
+        """
+        if confidence == "AMBIGUOUS":
+            self.neuromodulators.urgency += NE_CONFLICT_GAIN
+            self.neuromodulators.learning_rate += ACH_UNCERTAINTY_GAIN
+        elif confidence == "INFERRED":
+            self.neuromodulators.learning_rate += ACH_UNCERTAINTY_GAIN * 0.5
+        # EXTRACTED: no modulation
+
     # ── Decay (inter-event baseline drift) ───────────────────────
 
     def decay(self) -> None:

@@ -96,6 +96,13 @@ class AnteriorCingulateCortex(BrainRegion):
                 conflict_score += 0.2
                 reasons.append("high_emotional_risk")
 
+        # 6. Knowledge confidence assessment
+        knowledge_confidences = signal.payload.get("knowledge_confidences", [])
+        ambiguous_count = sum(1 for c in knowledge_confidences if c == "AMBIGUOUS")
+        if ambiguous_count > 0:
+            conflict_score += 0.15 * min(ambiguous_count, 3)
+            reasons.append(f"{ambiguous_count} AMBIGUOUS knowledge edges")
+
         self.emit_activation(min(1.0, conflict_score))
 
         if conflict_score >= effective_threshold:
