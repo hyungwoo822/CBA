@@ -150,13 +150,13 @@ class ConsolidationEngine:
         if self._pfc_fn and self._semantic:
             try:
                 from brain_agent.memory.semantic_extractor import (
-                    find_episode_clusters,
+                    find_episode_clusters_leiden,
                     build_extraction_prompt,
                     parse_extraction_response,
                 )
 
                 recent_episodes = await self._episodic.get_recent(limit=50)
-                clusters = find_episode_clusters(
+                clusters = find_episode_clusters_leiden(
                     recent_episodes, self._similarity_fn,
                 )
                 for cluster in clusters:
@@ -176,8 +176,10 @@ class ConsolidationEngine:
                                         except (ValueError, TypeError):
                                             w = 0.7
                                         cat = rel[4] if len(rel) >= 5 and isinstance(rel[4], str) else "GENERAL"
+                                        conf = "INFERRED" if w >= 0.5 else "AMBIGUOUS"
                                         await self._semantic.add_relationship(
                                             rel[0], rel[1], rel[2], weight=w, category=cat,
+                                            confidence=conf,
                                         )
                                 result.semantic_extracted += 1
                     except Exception:
