@@ -23,6 +23,9 @@ class MyelinSheath(Middleware):
     Wraps every ``LLMProvider.chat()`` call and logs token
     consumption — the neural metabolic equivalent of glucose uptake
     during high-frequency axonal firing.
+
+    When a ``trace_parent`` is present in the context, creates a
+    LangSmith child run of type ``llm`` for cost tracking.
     """
 
     def __init__(self):
@@ -31,9 +34,29 @@ class MyelinSheath(Middleware):
         self._call_count = 0
 
     async def __call__(self, context, next_fn):
+        # ── Trace: create LLM child run if tracing is active ──
+        trace_parent = context.get("trace_parent")
+        trace_region = context.get("trace_region", "unknown")
+        llm_run = None
+        if trace_parent:
+            try:
+                llm_run = trace_parent.create_child(
+                    name="llm.chat",
+                    run_type="llm",
+                    inputs={
+                        "messages": context.get("messages", []),
+                        "model": context.get("model"),
+                    },
+                    extra={"region": trace_region},
+                )
+            except Exception as e:
+                logger.warning("Failed to create LLM trace run: %s", e)
+
         context = await next_fn(context)
 
         usage = context.get("usage", {})
+
+        # ── Token accounting (existing logic) ──
         if usage and "error" not in usage:
             prompt = usage.get("prompt_tokens", 0)
             completion = usage.get("completion_tokens", 0)
@@ -49,6 +72,19 @@ class MyelinSheath(Middleware):
                 self._call_count, prompt, completion, total,
                 self._total_prompt + self._total_completion,
             )
+
+        # ── Trace: finalize LLM child run ──
+        if llm_run:
+            try:
+                response = context.get("response")
+                llm_run.end(outputs={
+                    "content": response.content if response else None,
+                    "usage": usage,
+                })
+                llm_run.post()
+            except Exception as e:
+                logger.warning("Failed to end LLM trace run: %s", e)
+
         return context
 
 
