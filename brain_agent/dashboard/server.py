@@ -320,6 +320,7 @@ def create_app(static_dir: str | None = None, agent: "BrainAgent | None" = None)
     @app.post("/api/process")
     async def process_message(
         text: str = Form(default=""),
+        mode: str = Form(default="question"),
         files: list[UploadFile] = File(default=[]),
     ):
         agent_inst: BrainAgent | None = _state["agent"]
@@ -351,7 +352,7 @@ def create_app(static_dir: str | None = None, agent: "BrainAgent | None" = None)
         if not full_text.strip() and not image_bytes and not audio_bytes:
             return {"error": "empty message"}
 
-        result = await agent_inst.process(full_text, image=image_bytes, audio=audio_bytes)
+        result = await agent_inst.process(full_text, image=image_bytes, audio=audio_bytes, interaction_mode=mode)
         pipeline = agent_inst.pipeline
 
         # Broadcast response to enabled channels
