@@ -44,7 +44,7 @@ async def test_creates_llm_child_run_when_trace_parent_present():
     assert "messages" in kwargs["inputs"]
 
     mock_child.end.assert_called_once()
-    assert mock_child.extra["usage_metadata"]["input_tokens"] == 10
+    assert mock_child.extra["metadata"]["usage_metadata"]["input_tokens"] == 10
     mock_child.post.assert_called_once()
 
 

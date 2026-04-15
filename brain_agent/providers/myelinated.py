@@ -50,10 +50,13 @@ class MyelinatedProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.7,
     ) -> LLMResponse:
+        # Resolve model name — regions call chat(model=None),
+        # but the actual model is on the inner provider.
+        resolved_model = model or self._inner.get_default_model()
         context = MiddlewareContext(data={
             "messages": messages,
             "tools": tools,
-            "model": model,
+            "model": resolved_model,
             "max_tokens": max_tokens,
             "temperature": temperature,
             "trace_parent": self._trace_parent,

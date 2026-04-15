@@ -90,15 +90,18 @@ class MyelinSheath(Middleware):
         if llm_run:
             try:
                 response = context.get("response")
-                # Set usage on extra (LangSmith reads from here for cost)
+                usage_meta = None
                 if usage and "error" not in usage:
-                    llm_run.extra["usage_metadata"] = {
+                    usage_meta = {
                         "input_tokens": usage.get("prompt_tokens", 0),
                         "output_tokens": usage.get("completion_tokens", 0),
                         "total_tokens": usage.get("total_tokens", 0),
                     }
+                    # LangSmith reads from extra.metadata.usage_metadata
+                    llm_run.extra.setdefault("metadata", {})["usage_metadata"] = usage_meta
                 llm_run.end(outputs={
                     "content": response.content if response else None,
+                    **({"usage_metadata": usage_meta} if usage_meta else {}),
                 })
                 llm_run.post()
             except Exception as e:
