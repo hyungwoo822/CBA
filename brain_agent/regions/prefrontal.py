@@ -70,6 +70,38 @@ Base this on: completeness of your knowledge, ambiguity of the question, quality
 This tag will be stripped from the final output — the user will NOT see it.
 """
 
+QUESTION_MODE_INSTRUCTION = """
+# Memory Gap Analysis (Question Mode)
+You analyze retrieved memories for logical gaps and ask about them naturally during conversation.
+
+Question targets:
+1. Time-based contradictions — facts that conflict across dates.
+   e.g., "Sick on 04-07" + "Went hiking on 04-10" → "저번에 아프다고 했는데 지금은 괜찮아진 거야?"
+2. Causal/preference unknowns — events with unconfirmed emotional or preference consequences.
+   e.g., "Hospitalized because of mussel" + no mussel preference recorded → "홍합 때문에 고생했는데, 이제 홍합 싫어졌어?"
+3. Emotional/rational change — past memory vs current statement inconsistency.
+   e.g., "Used to like coffee" + "Haven't mentioned coffee recently" → "예전에 커피 좋아한다고 했는데 요즘은 안 마셔?"
+
+Rules:
+- Maximum 1 question per turn. Only ask when a genuine gap exists.
+- Do NOT ask tail-chasing questions (continuing a conversation the user already ended).
+- Do NOT ask about missing details of past events (e.g., "What treatment did you get at the hospital?").
+- Weave the question naturally into your response — not as a separate interrogation.
+- If no gap is detected, respond normally without forcing a question.
+"""
+
+EXPRESSION_MODE_INSTRUCTION = """
+# Expression Mode (Read-Only Memory)
+You answer ONLY from facts stored in your memory. You are a faithful mirror of what you know.
+
+Rules:
+- If a fact is not in your memory, say "그건 아직 모르겠어" or equivalent.
+- NEVER infer, extrapolate, or guess. No "아마", "~일 수도", "~겠지" expressions.
+- NEVER fill logical gaps with reasoning. If memory says "user visited hospital" but not why, do NOT speculate about the reason.
+- Only state what is explicitly recorded in Retrieved Memories and User Profile.
+- Be honest about the boundaries of your knowledge.
+"""
+
 CORTICAL_INTEGRATION_INSTRUCTION = """
 IMPORTANT: Before your response text, output a cortical analysis block:
 
@@ -228,6 +260,7 @@ class PrefrontalCortex(BrainRegion):
         upstream_context: dict,
         memory_context: list[dict] | None = None,
         network_mode: str = "executive_control",
+        interaction_mode: str = "question",
     ) -> str:
         """Build system prompt for unified cortical integration.
 
@@ -293,7 +326,11 @@ class PrefrontalCortex(BrainRegion):
                     a = emotional.get("arousal", 0)
                     if v != 0 or a != 0:
                         em_str = f" [emotion: v={v:.1f}, a={a:.1f}]"
-                lines.append(f"{i}. [{src}|rel={score:.2f}]{em_str} {content}")
+                ts = mem.get("timestamp", "")
+                ts_str = ""
+                if ts:
+                    ts_str = f"|{ts[:10]}" if len(ts) >= 10 else ""
+                lines.append(f"{i}. [{src}|rel={score:.2f}{ts_str}]{em_str} {content}")
             system_parts.append("# Retrieved Memories (Hippocampus)\n" + "\n".join(lines))
 
         # Goals
@@ -321,6 +358,12 @@ class PrefrontalCortex(BrainRegion):
         # Entity extraction removed — PSC handles this exclusively
         # Metacognition
         system_parts.append(METACOGNITION_INSTRUCTION)
+
+        # Interaction mode instruction
+        if interaction_mode == "expression":
+            system_parts.append(EXPRESSION_MODE_INSTRUCTION)
+        else:
+            system_parts.append(QUESTION_MODE_INSTRUCTION)
 
         return "\n\n---\n\n".join(system_parts)
 
