@@ -18,6 +18,7 @@ from brain_agent.providers.base import LLMProvider
 from brain_agent.providers.litellm_provider import LiteLLMProvider
 from brain_agent.providers.myelinated import MyelinatedProvider
 from brain_agent.tools.registry import ToolRegistry
+from brain_agent.tracing import TracingManager
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,9 @@ class BrainAgent:
         self._myelin_mw = mw_registry.build_chain(self.config.middleware.myelin.enabled)
         self._barrier_mw = mw_registry.build_chain(self.config.middleware.barrier.enabled)
 
+        # ── Tracing (LangSmith observability) ──
+        self.tracing = TracingManager(self.config.tracing)
+
         # Myelinate the LLM provider — wraps every chat() call with
         # myelin middleware (token counting, etc.) transparently.
         # No brain region needs to know about the sheath.
@@ -176,6 +180,19 @@ class BrainAgent:
         )
         self.memory.set_context(interaction_id, session_id)
 
+        # ── Determine modality ──
+        modality = "text"
+        if image:
+            modality = "image"
+        elif audio:
+            modality = "audio"
+
+        # ── Trace: start root run ──
+        trace_run = self.tracing.start_request_trace(
+            text=text, session_id=session_id,
+            interaction_id=interaction_id, modality=modality,
+        )
+
         # ── Meninges wrap: pipeline-level protective membrane ──
         context = MiddlewareContext(data={
             "user_input": text,
@@ -188,13 +205,22 @@ class BrainAgent:
                 ctx["user_input"],
                 image=ctx.get("image"),
                 audio=ctx.get("audio"),
+                trace_run=trace_run,
             )
             ctx["result"] = result
             return ctx
 
         context = await self._meninges_mw.execute(context, _pipeline_core)
+        result = context["result"]
 
-        return context["result"]
+        # ── Trace: end root run ──
+        self.tracing.end_request_trace(trace_run, {
+            "response": result.response,
+            "network_mode": result.network_mode,
+            "signals_processed": result.signals_processed,
+        })
+
+        return result
 
     async def __aenter__(self):
         await self.initialize()
