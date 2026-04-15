@@ -44,7 +44,7 @@ async def test_creates_llm_child_run_when_trace_parent_present():
 
     mock_child.end.assert_called_once()
     end_kwargs = mock_child.end.call_args.kwargs
-    assert end_kwargs["outputs"]["usage"]["prompt_tokens"] == 10
+    assert end_kwargs["outputs"]["usage_metadata"]["input_tokens"] == 10
     mock_child.post.assert_called_once()
 
 

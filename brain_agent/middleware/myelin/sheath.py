@@ -38,6 +38,7 @@ class MyelinSheath(Middleware):
         trace_parent = context.get("trace_parent")
         trace_region = context.get("trace_region", "unknown")
         llm_run = None
+        model_name = context.get("model") or ""
         if trace_parent:
             try:
                 llm_run = trace_parent.create_child(
@@ -45,9 +46,15 @@ class MyelinSheath(Middleware):
                     run_type="llm",
                     inputs={
                         "messages": context.get("messages", []),
-                        "model": context.get("model"),
+                        "model": model_name,
                     },
-                    extra={"region": trace_region},
+                    extra={
+                        "region": trace_region,
+                        "metadata": {
+                            "ls_model_name": model_name,
+                            "ls_provider": model_name.split("/")[0] if "/" in model_name else "",
+                        },
+                    },
                 )
             except Exception as e:
                 logger.warning("Failed to create LLM trace run: %s", e)
@@ -79,7 +86,11 @@ class MyelinSheath(Middleware):
                 response = context.get("response")
                 llm_run.end(outputs={
                     "content": response.content if response else None,
-                    "usage": usage,
+                    "usage_metadata": {
+                        "input_tokens": usage.get("prompt_tokens", 0),
+                        "output_tokens": usage.get("completion_tokens", 0),
+                        "total_tokens": usage.get("total_tokens", 0),
+                    },
                 })
                 llm_run.post()
             except Exception as e:
