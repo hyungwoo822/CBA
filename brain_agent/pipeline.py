@@ -307,7 +307,10 @@ class ProcessingPipeline:
         '    ["mussel","cause","hospital_visit",0.8,"CAUSAL"],\n'
         '    ["user","visit","hospital",1.0,"ACTION"]\n'
         "- Include WHY/HOW links (CAUSAL), not just WHO/WHAT (ACTION).\n"
-        "- Skip greetings — do NOT extract greeting-related facts."
+        "- Skip greetings — do NOT extract greeting-related facts.\n"
+        "- PREFERENCE CHANGES are critical: if user reveals a change in preference, emotion, "
+        "or attitude (e.g., 'I used to like X but now I don\'t'), mark confidence=1.0. "
+        "This is a confirmed correction, not inference."
     )
 
     async def _post_synaptic_consolidation(
