@@ -54,6 +54,8 @@ interface BrainState {
   thinkingSteps: { region: string; phase: string; summary: string; details?: Record<string, any>; ts: number }[]
   isDragOver: boolean
   chatLoading: boolean
+  interactionMode: 'question' | 'expression'
+  setInteractionMode: (mode: 'question' | 'expression') => void
   profileModalOpen: boolean
 
   setRegionScreenPositions: (positions: Record<string, { x: number; y: number }>) => void
@@ -130,6 +132,8 @@ export const useBrainStore = create<BrainState>((set) => ({
   thinkingSteps: [],
   isDragOver: false,
   chatLoading: false,
+  interactionMode: 'question',
+  setInteractionMode: (mode) => set({ interactionMode: mode }),
   profileModalOpen: false,
 
   setRegionActivation: (region, level, mode) =>
@@ -250,6 +254,7 @@ export const useBrainStore = create<BrainState>((set) => ({
     try {
       const fd = new FormData()
       fd.append('text', text)
+      fd.append('mode', useBrainStore.getState().interactionMode)
 
       // Convert blob URLs back to File objects for upload
       for (const af of s.attachedFiles) {
