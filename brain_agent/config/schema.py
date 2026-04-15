@@ -95,7 +95,9 @@ class MiddlewareLayerConfig(BaseModel):
 
 class MiddlewareConfig(BaseModel):
     meninges: MiddlewareLayerConfig = Field(default_factory=MiddlewareLayerConfig)
-    myelin: MiddlewareLayerConfig = Field(default_factory=MiddlewareLayerConfig)
+    myelin: MiddlewareLayerConfig = Field(
+        default_factory=lambda: MiddlewareLayerConfig(enabled=["myelin_sheath"])
+    )
     barrier: MiddlewareLayerConfig = Field(default_factory=MiddlewareLayerConfig)
 
 
@@ -116,8 +118,8 @@ class ChannelsConfig(BaseModel):
 
 class TracingConfig(BaseModel):
     """LLM call tracing configuration (LangSmith)."""
-    enabled: bool = False
-    project_name: str = "brain-agent"
+    enabled: bool = True
+    project_name: str = "CBA"
     api_key: str = ""
 
 
