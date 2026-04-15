@@ -28,6 +28,7 @@ async def _mock_next_fn(ctx):
 async def test_creates_llm_child_run_when_trace_parent_present():
     mock_parent = MagicMock()
     mock_child = MagicMock()
+    mock_child.extra = {}  # real dict so usage_metadata can be set
     mock_parent.create_child.return_value = mock_child
 
     sheath = MyelinSheath()
@@ -43,8 +44,7 @@ async def test_creates_llm_child_run_when_trace_parent_present():
     assert "messages" in kwargs["inputs"]
 
     mock_child.end.assert_called_once()
-    end_kwargs = mock_child.end.call_args.kwargs
-    assert end_kwargs["outputs"]["usage_metadata"]["input_tokens"] == 10
+    assert mock_child.extra["usage_metadata"]["input_tokens"] == 10
     mock_child.post.assert_called_once()
 
 

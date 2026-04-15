@@ -692,7 +692,12 @@ class ProcessingPipeline:
         except Exception:
             pass  # Prediction is best-effort
 
-        self._end_phase(_phase1_run, outputs={"input_modality": input_modality})
+        self._end_phase(_phase1_run, outputs={
+            "input_modality": input_modality,
+            "word_count": len(text.split()),
+            "prediction_surprise": round(prediction_surprise, 3),
+            "signals_processed": signals_count,
+        })
 
         # ══════════════════════════════════════════════════════════════
         # Phase 2+3: Dual-Stream + Integration
@@ -899,7 +904,20 @@ class ProcessingPipeline:
         wm_item = WorkingMemoryItem(content=text, slot="phonological", metadata=wm_meta)
         self.memory.working.load(wm_item)
 
-        self._end_phase(_phase23_run, outputs={"comprehension_intent": comprehension.get("intent", "")})
+        self._end_phase(_phase23_run, outputs={
+            "comprehension": {
+                "intent": comprehension.get("intent", ""),
+                "complexity": comprehension.get("complexity", ""),
+                "keywords": comprehension.get("keywords", []),
+                "language": comprehension.get("language", ""),
+                "word_count": comprehension.get("word_count", 0),
+            },
+            "emotional_tag": {
+                "valence": round(input_signal.emotional_tag.valence, 3) if input_signal.emotional_tag else 0,
+                "arousal": round(input_signal.emotional_tag.arousal, 3) if input_signal.emotional_tag else 0,
+            },
+            "network_mode": self.network_ctrl.current_mode.value,
+        })
 
         # ══════════════════════════════════════════════════════════════
         # Phase 6: Retrieval (Squire 2004, Tulving 2002)
@@ -1008,7 +1026,19 @@ class ProcessingPipeline:
         await self._emit("region_processing", "pipeline", "routing",
             f"Processing depth: {processing_depth}")
 
-        self._end_phase(_phase6_run, outputs={"memories_retrieved": len(retrieved)})
+        self._end_phase(_phase6_run, outputs={
+            "memories_retrieved_count": len(retrieved),
+            "memories": [
+                {
+                    "type": m.get("type", ""),
+                    "content": str(m.get("content", ""))[:100],
+                    "score": round(m.get("score", 0), 3),
+                }
+                for m in retrieved[:5]
+            ],
+            "has_cached_procedure": bool(cached_procedure),
+            "processing_depth": processing_depth,
+        })
 
         # ══════════════════════════════════════════════════════════════
         # Executive Processing with Recurrent Loop (Lamme 2006)
@@ -1703,7 +1733,13 @@ class ProcessingPipeline:
 
         self.neuro_ctrl.on_system_state(pending_requests=0, error_rate=min(1.0, error_rate))
 
-        self._end_phase(_phase7_run, outputs={"response_length": len(result.response)})
+        self._end_phase(_phase7_run, outputs={
+            "response": result.response[:200],
+            "response_length": len(result.response),
+            "actions_taken": len(result.actions_taken),
+            "network_mode": self.network_ctrl.current_mode.value,
+            "neuromodulators_final": self.neuromodulators.snapshot(),
+        })
         self._clear_llm_trace()
         self._current_trace_run = None
 

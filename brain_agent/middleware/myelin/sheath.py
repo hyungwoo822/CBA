@@ -39,6 +39,12 @@ class MyelinSheath(Middleware):
         trace_region = context.get("trace_region", "unknown")
         llm_run = None
         model_name = context.get("model") or ""
+        # LangSmith expects model name without provider prefix
+        # e.g. "openai/gpt-4o-mini" → provider="openai", model="gpt-4o-mini"
+        if "/" in model_name:
+            ls_provider, ls_model = model_name.split("/", 1)
+        else:
+            ls_provider, ls_model = "", model_name
         if trace_parent:
             try:
                 llm_run = trace_parent.create_child(
@@ -51,8 +57,8 @@ class MyelinSheath(Middleware):
                     extra={
                         "region": trace_region,
                         "metadata": {
-                            "ls_model_name": model_name,
-                            "ls_provider": model_name.split("/")[0] if "/" in model_name else "",
+                            "ls_model_name": ls_model,
+                            "ls_provider": ls_provider,
                         },
                     },
                 )
@@ -84,13 +90,15 @@ class MyelinSheath(Middleware):
         if llm_run:
             try:
                 response = context.get("response")
-                llm_run.end(outputs={
-                    "content": response.content if response else None,
-                    "usage_metadata": {
+                # Set usage on extra (LangSmith reads from here for cost)
+                if usage and "error" not in usage:
+                    llm_run.extra["usage_metadata"] = {
                         "input_tokens": usage.get("prompt_tokens", 0),
                         "output_tokens": usage.get("completion_tokens", 0),
                         "total_tokens": usage.get("total_tokens", 0),
-                    },
+                    }
+                llm_run.end(outputs={
+                    "content": response.content if response else None,
                 })
                 llm_run.post()
             except Exception as e:
