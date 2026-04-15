@@ -362,6 +362,7 @@ class MemoryManager:
                 "access_count": int(mem.get("metadata", {}).get("access_count", 0)),
                 "recency_distance": 0.0,
                 "context_similarity": relevance,
+                "timestamp": "",
             })
 
         # 2. Episodic store — recent episodes scored with embedding similarity
@@ -396,6 +397,7 @@ class MemoryManager:
                 "access_count": ep.get("access_count", 0),
                 "recency_distance": recency_dist,
                 "context_similarity": ctx_sim,
+                "timestamp": ep.get("timestamp", ""),
             })
 
         # 3. Spreading activation — parallel search for activated nodes

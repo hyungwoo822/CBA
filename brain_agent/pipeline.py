@@ -286,8 +286,8 @@ class ProcessingPipeline:
         "(Diekelmann & Born 2010). Given a conversation turn, perform THREE tasks simultaneously:\n\n"
         "1. **Refine response** (Broca): Polish the agent's response for natural language quality. "
         "If the response is already good, set refined_response to null.\n"
-        "2. **Extract user facts** (Hippocampus): Extract entities and relations about the user. "
-        "ALL entity names in English lowercase. Relations in English verb infinitives.\n"
+        "2. **Extract user facts** (Hippocampus): Extract entities AND their relationships as a "
+        "story graph. Not just isolated facts — capture causal chains and context.\n"
         "3. **Evaluate procedural pattern** (Striatum): If this interaction pattern is reusable, "
         "output trigger+strategy. If not (trivial greetings, one-off questions), set procedural to null.\n\n"
         "Output ONLY valid JSON:\n"
@@ -295,10 +295,19 @@ class ProcessingPipeline:
         ' "user_facts": {"entities": ["e1"], "relations": [["subj","rel","obj",conf,"CAT"]]},\n'
         ' "procedural": {"trigger": "pattern", "strategy": "approach"} | null}\n\n'
         "Rules for user_facts:\n"
+        "- ALL entities in English lowercase. ALL relations in English verb infinitives.\n"
+        "- Strip Korean particles from names: '짬뽕을'→'jjambbong', '형푸야'→'hyungpu'\n"
         "- Confidence: 1.0=explicit, 0.8=implied, 0.6=inferred\n"
-        "- Categories: PREFERENCE|ACTION|ATTRIBUTE|SOCIAL|CAUSAL|IDENTITY|EMOTION\n"
-        "- Strip Korean particles from entity names\n"
-        "- Build multi-entity graph, not just user→X flat triples"
+        "- Categories: PREFERENCE|ACTION|ATTRIBUTE|SOCIAL|CAUSAL|IDENTITY|EMOTION|SPATIAL\n"
+        "- Build a STORY GRAPH — connect entities to each other, not just user→X:\n"
+        '  e.g. "짬뽕 먹다가 홍합이 목에 걸려서 병원 갔어" →\n'
+        '    ["user","eat","jjambbong",1.0,"ACTION"],\n'
+        '    ["jjambbong","contain","mussel",0.8,"CAUSAL"],\n'
+        '    ["mussel","get_stuck_in","throat",1.0,"CAUSAL"],\n'
+        '    ["mussel","cause","hospital_visit",0.8,"CAUSAL"],\n'
+        '    ["user","visit","hospital",1.0,"ACTION"]\n'
+        "- Include WHY/HOW links (CAUSAL), not just WHO/WHAT (ACTION).\n"
+        "- Skip greetings — do NOT extract greeting-related facts."
     )
 
     async def _post_synaptic_consolidation(
@@ -600,7 +609,7 @@ class ProcessingPipeline:
     # MAIN ENTRY POINT
     # ==================================================================
 
-    async def process_request(self, text: str = "", image: bytes | None = None, audio: bytes | None = None, trace_run=None) -> PipelineResult:
+    async def process_request(self, text: str = "", image: bytes | None = None, audio: bytes | None = None, trace_run=None, interaction_mode: str = "question") -> PipelineResult:
         """Process a single user request through the 7-phase neural pipeline."""
         result = PipelineResult()
         signals_count = 0
@@ -656,7 +665,9 @@ class ProcessingPipeline:
             input_signal.payload["image_data"] = image
             input_signal.type = SignalType.IMAGE_INPUT
             pre_visual = Signal(type=input_signal.type, source=input_signal.source, payload=dict(input_signal.payload))
+            self._set_llm_trace(_phase1_run, "visual_cortex")
             input_signal = await self.visual_cortex.process(input_signal)
+            self._clear_llm_trace()
             signals_count += 1
             await self._emit_region_io("visual_cortex", pre_visual, input_signal, "V1_feature_extraction")
             await self._emit("region_activation", "visual_cortex", self.visual_cortex.activation_level, "active")
@@ -1088,6 +1099,7 @@ class ProcessingPipeline:
                     upstream_context=input_signal.metadata.get("upstream_context", {}),
                     memory_context=retrieved,
                     network_mode=self.network_ctrl.current_mode.value,
+                    interaction_mode=interaction_mode,
                 )
                 messages = [{"role": "system", "content": cortical_prompt}]
                 messages.extend(self.pfc._conversation_history)
@@ -1531,12 +1543,18 @@ class ProcessingPipeline:
         _comprehension = dict(comprehension)
         _input_text = text
         _hypo_result_ref = [None]  # mutable ref for hypothalamus result
+        _trace_run = self._current_trace_run  # capture before cleared
+        _interaction_mode = interaction_mode
 
         async def _background_post_response() -> None:
             """Phase 4 encoding + KG storage + Phase 5 consolidation (non-blocking)."""
             try:
+                # ── Expression mode: skip all memory writes ──
+                if _interaction_mode == "expression":
+                    return
+
                 # ── Phase 4: Hippocampal encoding ──
-                await self.memory.encode(
+                _episodic_mem_id = await self.memory.encode(
                     content=encode_content,
                     entities=encode_entities,
                     emotional_tag=emotional_tag_dict,
@@ -1552,40 +1570,23 @@ class ProcessingPipeline:
                 # Merges Broca refinement + fact extraction + procedural eval
                 # into single consolidation cycle (Diekelmann & Born 2010)
 
-                # 1. Store PFC-extracted entities (from cortical integration, no extra LLM)
-                if _plan_signal:
-                    _extracted = _plan_signal.metadata.get("extracted_entities", {})
-                    kg_entities = _extracted.get("entities", [])
-                    about_user = _extracted.get("about_user", [])
-                    knowledge = _extracted.get("knowledge", [])
-                    logger.info("KG extraction: %d entities, %d about_user, %d knowledge from cortical integration",
-                                len(kg_entities), len(about_user), len(knowledge))
-
-                    kw = _comprehension.get("keywords", [])
-                    if kw and not kg_entities:
-                        kg_entities = kw
-                    if kw and not about_user and not knowledge and _comprehension.get("intent"):
-                        intent = _comprehension["intent"]
-                        for keyword in kw[:3]:
-                            about_user.append(["user", intent, keyword, 0.6, "ACTION"])
-
-                    if about_user:
-                        facts_au = [f"{r[0]} {r[1].replace('_', ' ')} {r[2]}" for r in about_user if len(r) >= 3]
-                        await self.memory.store_semantic_facts(
-                            entities=kg_entities, relations=about_user,
-                            facts=facts_au if facts_au else None, origin="agent_about_user",
-                        )
-                        await self._store_identity_facts_realtime(about_user, source="pfc_extraction")
-
-                    if knowledge:
-                        facts_k = [f"{r[0]} {r[1].replace('_', ' ')} {r[2]}" for r in knowledge if len(r) >= 3]
-                        await self.memory.store_semantic_facts(
-                            entities=kg_entities, relations=knowledge,
-                            facts=facts_k if facts_k else None, origin="agent_knowledge",
-                        )
+                # PFC entity extraction removed — PSC is the sole extractor.
+                # The old keyword fallback (intent + keywords → dummy triples)
+                # produced garbage like "user inform 짬뽕" and is no longer needed.
 
                 # 2. PSC: single LLM call for user facts + procedural (replaces _extract_user_facts + procedural eval)
                 if self.pfc.llm_provider and _comprehension.get("intent"):
+                    # ── Trace: PSC span ──
+                    _psc_run = None
+                    if _trace_run:
+                        try:
+                            _psc_run = _trace_run.create_child(
+                                name="phase.psc_consolidation", run_type="chain",
+                                inputs={"input": _input_text[:200]}, extra={},
+                            )
+                            self._set_llm_trace(_psc_run, "psc")
+                        except Exception:
+                            pass
                     try:
                         psc_result = await self._post_synaptic_consolidation(
                             original_input=_input_text,
@@ -1604,6 +1605,13 @@ class ProcessingPipeline:
                             await self._store_identity_facts_realtime(
                                 u_facts.get("relations", []), source="psc_consolidation",
                             )
+                            # Enrich episodic memory with PSC story graph
+                            await self.memory.staging.update_entities(
+                                _episodic_mem_id, {
+                                    "extracted_entities": u_facts.get("entities", []),
+                                    "extracted_relations": u_facts.get("relations", []),
+                                },
+                            )
 
                         # Procedural from PSC
                         proc = psc_result.get("procedural")
@@ -1619,6 +1627,14 @@ class ProcessingPipeline:
                                 logger.warning("PSC procedural save failed: %s", e)
                     except Exception:
                         logger.warning("PSC consolidation failed", exc_info=True)
+                    finally:
+                        if _psc_run:
+                            try:
+                                _psc_run.end(outputs={})
+                                _psc_run.post()
+                            except Exception:
+                                pass
+                        self._clear_llm_trace()
 
                 # ── Phase 5: Consolidation ──
                 staging_count = await self.memory.staging.count_unconsolidated()
@@ -1641,6 +1657,17 @@ class ProcessingPipeline:
                     await self.memory.consolidate()
 
                 if staging_snapshot:
+                    # ── Trace: Narrative consolidation span ──
+                    _narr_run = None
+                    if _trace_run:
+                        try:
+                            _narr_run = _trace_run.create_child(
+                                name="phase.5_narrative_consolidation", run_type="chain",
+                                inputs={"episodes": len(staging_snapshot)}, extra={},
+                            )
+                            self._set_llm_trace(_narr_run, "narrative_consolidation")
+                        except Exception:
+                            pass
                     try:
                         from brain_agent.memory.narrative_consolidation import narrative_consolidate
                         llm = getattr(self.pfc, 'llm_provider', None) or self._llm_provider
@@ -1657,6 +1684,14 @@ class ProcessingPipeline:
                                 self.mpfc.reload_schema()
                     except Exception as e:
                         logger.warning("Narrative consolidation failed: %s", e)
+                    finally:
+                        if _narr_run:
+                            try:
+                                _narr_run.end(outputs={})
+                                _narr_run.post()
+                            except Exception:
+                                pass
+                        self._clear_llm_trace()
 
                 # Layer 3: Dreaming — promote high-recall memories to identity_facts
                 if self.dreaming.should_dream():
