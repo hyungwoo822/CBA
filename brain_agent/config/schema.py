@@ -114,6 +114,13 @@ class ChannelsConfig(BaseModel):
     discord: DiscordConfig = Field(default_factory=DiscordConfig)
 
 
+class TracingConfig(BaseModel):
+    """LLM call tracing configuration (LangSmith)."""
+    enabled: bool = False
+    project_name: str = "brain-agent"
+    api_key: str = ""
+
+
 class BrainAgentConfig(BaseModel):
     agent: AgentConfig = Field(default_factory=AgentConfig)
     provider: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -126,6 +133,7 @@ class BrainAgentConfig(BaseModel):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     middleware: MiddlewareConfig = Field(default_factory=MiddlewareConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    tracing: TracingConfig = Field(default_factory=TracingConfig)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BrainAgentConfig:
