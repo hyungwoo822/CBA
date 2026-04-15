@@ -30,7 +30,7 @@ class TestDisabled:
 
 
 class TestEnabled:
-    @patch("brain_agent.tracing.manager.LangSmithTracer")
+    @patch("brain_agent.tracing.langsmith_tracer.LangSmithTracer")
     def test_start_creates_root_run(self, MockTracer):
         mock_tracer = MagicMock()
         mock_run = MagicMock()
@@ -47,7 +47,7 @@ class TestEnabled:
             extra={"session_id": "s1", "interaction_id": "i1"},
         )
 
-    @patch("brain_agent.tracing.manager.LangSmithTracer")
+    @patch("brain_agent.tracing.langsmith_tracer.LangSmithTracer")
     def test_end_finalizes_root_run(self, MockTracer):
         mock_tracer = MagicMock()
         MockTracer.return_value = mock_tracer
@@ -61,7 +61,7 @@ class TestEnabled:
             outputs={"response": "hi", "network_mode": "ECN"},
         )
 
-    @patch("brain_agent.tracing.manager.LangSmithTracer")
+    @patch("brain_agent.tracing.langsmith_tracer.LangSmithTracer")
     def test_create_child_delegates_to_tracer(self, MockTracer):
         mock_tracer = MagicMock()
         mock_child = MagicMock()
@@ -74,14 +74,14 @@ class TestEnabled:
 
         assert child is mock_child
 
-    @patch("brain_agent.tracing.manager.LangSmithTracer")
+    @patch("brain_agent.tracing.langsmith_tracer.LangSmithTracer")
     def test_create_child_returns_none_when_parent_is_none(self, MockTracer):
         MockTracer.return_value = MagicMock()
         mgr = TracingManager(TracingConfig(enabled=True))
         child = mgr.create_child(None, "phase.sensory", "chain", {})
         assert child is None
 
-    @patch("brain_agent.tracing.manager.LangSmithTracer")
+    @patch("brain_agent.tracing.langsmith_tracer.LangSmithTracer")
     def test_end_child_delegates_to_tracer(self, MockTracer):
         mock_tracer = MagicMock()
         MockTracer.return_value = mock_tracer

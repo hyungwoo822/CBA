@@ -5,7 +5,6 @@ import logging
 from typing import Any
 
 from brain_agent.config.schema import TracingConfig
-from brain_agent.tracing.langsmith_tracer import LangSmithTracer
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +19,7 @@ class TracingManager:
         self._enabled = config.enabled
         self._tracer = None
         if self._enabled:
+            from brain_agent.tracing.langsmith_tracer import LangSmithTracer
             self._tracer = LangSmithTracer(
                 project_name=config.project_name,
                 api_key=config.api_key or None,

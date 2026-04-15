@@ -5,7 +5,7 @@ from brain_agent.tracing.langsmith_tracer import LangSmithTracer
 
 
 class TestCreateRootRun:
-    @patch("brain_agent.tracing.langsmith_tracer.RunTree")
+    @patch("langsmith.RunTree")
     def test_creates_run_tree_with_correct_params(self, MockRunTree):
         mock_run = MagicMock()
         MockRunTree.return_value = mock_run
@@ -28,7 +28,7 @@ class TestCreateRootRun:
 
 
 class TestCreateChildRun:
-    @patch("brain_agent.tracing.langsmith_tracer.RunTree")
+    @patch("langsmith.RunTree")
     def test_creates_child_on_parent(self, MockRunTree):
         parent = MagicMock()
         child = MagicMock()
