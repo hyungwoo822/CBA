@@ -529,13 +529,9 @@ class MemoryManager:
             Source of the facts: ``"user_input"``, ``"agent_response"``, or
             ``"unknown"`` (default).
         """
-        # Store individual entity concepts as vector documents
-        # Skip very short tokens (single chars, particles) — no semantic value
-        for entity in entities:
-            if entity and len(entity.strip()) >= 2:
-                await self.semantic.add(
-                    entity.strip(), category="entity", strength=0.9,
-                )
+        # Bare entity words (e.g., "user", "telegram") are NOT stored in
+        # ChromaDB — they add noise and are already represented as nodes
+        # in the knowledge_graph table.
 
         # Store relations in knowledge graph
         # Relations may be [s, r, t], [s, r, t, confidence], or [s, r, t, confidence, category]
@@ -553,13 +549,22 @@ class MemoryManager:
                     origin=origin,
                 )
 
-        # Store fact documents in vector store
+        # Store fact documents in vector store — skip if a similar fact
+        # already exists (cosine distance < 0.10 ≈ 90% similarity).
         if facts:
             for fact in facts:
-                if fact.strip():
-                    await self.semantic.add(
-                        fact.strip(), category="extracted_fact", strength=1.0,
-                    )
+                text = fact.strip()
+                if not text or len(text) < 4:
+                    continue
+                try:
+                    existing = await self.semantic.search(text, top_k=1)
+                    if existing and existing[0].get("distance", 1.0) < 0.10:
+                        continue  # semantically duplicate, skip
+                except Exception:
+                    pass  # search failed, store anyway
+                await self.semantic.add(
+                    text, category="extracted_fact", strength=1.0,
+                )
 
     async def update_knowledge_graph(
         self,

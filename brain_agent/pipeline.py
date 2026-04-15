@@ -433,17 +433,25 @@ class ProcessingPipeline:
     async def _store_identity_facts_realtime(self, relations: list, source: str = "realtime") -> int:
         """Store durable user-related facts as identity_facts immediately.
 
-        Stores ALL relations that involve the user's world — not just
-        'user → X' triples, but also multi-entity edges like
-        'grandmother → visit → user' or 'coffee → increase → dopamine'.
-
-        This enables a richer agent user model that mirrors the user's
-        actual knowledge graph structure.
+        Key normalization rules (prevent semantic duplicates):
+          1. Greeting filter — greet/greeting relations are transient, skip.
+          2. Subject normalization — user's known names → "user".
+          3. Verb-free keys — key = {cat}:{obj}, NOT {cat}:{verb}:{obj}.
+             This collapses 'be:sick', 'feel:sick', 'is:sick' → 'attribute:sick'.
 
         Returns the number of facts stored.
         """
         DURABLE_CATEGORIES = {"IDENTITY", "PREFERENCE", "ATTRIBUTE", "SOCIAL",
                               "ACTION", "EMOTION", "CAUSAL", "SPATIAL"}
+        _GREETING_VERBS = {"greet", "greeting", "say_hello", "say_hi"}
+
+        # Collect known user names for subject normalization
+        _user_aliases = {"user"}
+        for f in getattr(self.tpj, '_identity_facts', []):
+            k = f.get("key", "").lower()
+            if k in ("name", "identity"):
+                _user_aliases.add(f.get("value", "").lower())
+
         stored = 0
         for rel in relations:
             if len(rel) < 3:
@@ -461,18 +469,29 @@ class ProcessingPipeline:
             if cat not in DURABLE_CATEGORIES or conf < 0.6:
                 continue
 
-            # Generate semantic key — preserve multi-entity structure
+            # ── Filter: skip greeting-related facts ──
+            rel_lower = relation.lower().replace(" ", "_")
+            if any(g in rel_lower for g in _GREETING_VERBS):
+                continue
+
+            # ── Subject normalization: user's known names → "user" ──
+            if subj in _user_aliases:
+                subj = "user"
+
+            # ── Key normalization: verb-free keys ──
+            obj_key = obj.replace(" ", "_").lower()
+
             if subj == "user":
-                # User-centric: user → relation → object
                 if cat == "IDENTITY":
                     key = relation.replace(" ", "_").lower()
                     value = obj
                 else:
-                    key = f"{cat.lower()}:{relation.replace(' ', '_')}:{obj.replace(' ', '_').lower()}"
+                    # {cat}:{obj} — verb excluded to prevent duplicates
+                    key = f"{cat.lower()}:{obj_key}"
                     value = f"{relation} {obj}"
             else:
-                # Multi-entity: subject → relation → object (e.g., grandmother → visit → user)
-                key = f"{cat.lower()}:{subj.replace(' ', '_')}:{relation.replace(' ', '_')}:{obj.replace(' ', '_').lower()}"
+                # Multi-entity: {cat}:{subj}:{obj} — verb excluded
+                key = f"{cat.lower()}:{subj.replace(' ', '_')}:{obj_key}"
                 value = f"{subj} {relation} {obj}"
 
             try:
@@ -991,13 +1010,13 @@ class ProcessingPipeline:
             input_signal.metadata["cached_procedure"] = cached_procedure
         input_signal.metadata["network_mode"] = self.network_ctrl.current_mode.value
 
-        # Render identity_facts as user profile + long-term memory for PFC
+        # Render identity_facts as user profile for PFC
+        # NOTE: render_memory_context() reads the same identity_facts table
+        # as TPJ.get_user_context(), causing full duplication in the prompt.
+        # User profile (from TPJ) already contains all identity facts with
+        # category organization — no need to duplicate as "Long-term Memory".
         user_context = input_signal.metadata.get("user_context", "")
         memory_context = ""
-        try:
-            memory_context = await self.memory.render_memory_context()
-        except Exception:
-            pass
 
         # Upstream context: everything PFC needs from Phases 1-3 and 6
         input_signal.metadata["upstream_context"] = {
