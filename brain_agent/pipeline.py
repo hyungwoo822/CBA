@@ -1016,6 +1016,14 @@ class ProcessingPipeline:
         # ══════════════════════════════════════════════════════════════
 
         _phase7_run = self._start_phase("phase.7_executive", inputs={"processing_depth": processing_depth})
+        if _phase7_run:
+            try:
+                _phase7_run.extra.update({
+                    "neuromodulators": self.neuromodulators.snapshot(),
+                    "network_mode": self.network_ctrl.current_mode.value,
+                })
+            except Exception:
+                pass
 
         plan_signal = None
         conflict = None

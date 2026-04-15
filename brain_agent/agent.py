@@ -218,6 +218,8 @@ class BrainAgent:
             "response": result.response,
             "network_mode": result.network_mode,
             "signals_processed": result.signals_processed,
+            "memories_retrieved_count": len(result.memories_retrieved),
+            "from_cache": result.from_cache,
         })
 
         return result
