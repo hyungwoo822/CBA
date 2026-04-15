@@ -7,7 +7,7 @@ from brain_agent.config.schema import BrainAgentConfig, TracingConfig
 
 
 class TestTracingManagerInit:
-    @patch("brain_agent.tracing.langsmith_tracer.LangSmithTracer")
+    @patch("brain_agent.tracing.langfuse_tracer.LangFuseTracer")
     def test_agent_creates_tracing_manager_when_enabled(self, MockTracer, tmp_path):
         config = BrainAgentConfig(tracing=TracingConfig(enabled=True, project_name="test-brain"))
         agent = BrainAgent(
@@ -42,7 +42,7 @@ def _make_agent_ready(agent):
 
 
 class TestRootTraceLifecycle:
-    @patch("brain_agent.tracing.langsmith_tracer.LangSmithTracer")
+    @patch("brain_agent.tracing.langfuse_tracer.LangFuseTracer")
     @pytest.mark.asyncio
     async def test_process_creates_and_ends_root_trace(self, MockTracer, tmp_path):
         mock_tracer = MagicMock()

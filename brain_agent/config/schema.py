@@ -117,8 +117,9 @@ class ChannelsConfig(BaseModel):
 
 
 class TracingConfig(BaseModel):
-    """LLM call tracing configuration (LangSmith)."""
+    """LLM call tracing configuration (LangSmith / LangFuse)."""
     enabled: bool = True
+    provider: str = "langfuse"  # "langfuse" | "langsmith"
     project_name: str = "CBA"
     api_key: str = ""
 

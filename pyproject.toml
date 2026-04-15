@@ -25,6 +25,7 @@ dependencies = [
     "mcp>=1.0.0",
     "networkx>=3.0",
     "langsmith>=0.1.0",
+    "langfuse>=4.0.0",
 ]
 
 [project.scripts]

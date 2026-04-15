@@ -17,14 +17,22 @@ class TracingManager:
 
     def __init__(self, config: TracingConfig):
         self._enabled = config.enabled
+        self._provider = config.provider
         self._tracer = None
         if self._enabled:
-            from brain_agent.tracing.langsmith_tracer import LangSmithTracer
-            self._tracer = LangSmithTracer(
-                project_name=config.project_name,
-                api_key=config.api_key or None,
-            )
-            logger.info("Tracing enabled — project: %s", config.project_name)
+            if config.provider == "langsmith":
+                from brain_agent.tracing.langsmith_tracer import LangSmithTracer
+                self._tracer = LangSmithTracer(
+                    project_name=config.project_name,
+                    api_key=config.api_key or None,
+                )
+            else:  # langfuse (default)
+                from brain_agent.tracing.langfuse_tracer import LangFuseTracer
+                self._tracer = LangFuseTracer(
+                    project_name=config.project_name,
+                    api_key=config.api_key or None,
+                )
+            logger.info("Tracing enabled — provider: %s, project: %s", config.provider, config.project_name)
 
     def start_request_trace(
         self, text: str, session_id: str, interaction_id: str, modality: str,
