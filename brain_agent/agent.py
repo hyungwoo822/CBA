@@ -153,7 +153,7 @@ class BrainAgent:
         await self.memory.close()
         self._initialized = False
 
-    async def process(self, text: str, image: bytes | None = None, audio: bytes | None = None) -> PipelineResult:
+    async def process(self, text: str, image: bytes | None = None, audio: bytes | None = None, interaction_mode: str = "question") -> PipelineResult:
         """Process a user request through the full brain pipeline.
 
         The meninges middleware wraps this entire cycle — like the dura
@@ -206,6 +206,7 @@ class BrainAgent:
                 image=ctx.get("image"),
                 audio=ctx.get("audio"),
                 trace_run=trace_run,
+                interaction_mode=interaction_mode,
             )
             ctx["result"] = result
             return ctx
