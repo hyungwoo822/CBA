@@ -26,9 +26,21 @@ class MyelinatedProvider(LLMProvider):
     def __init__(self, inner: LLMProvider, myelin: MiddlewareChain):
         self._inner = inner
         self._myelin = myelin
+        self._trace_parent = None
+        self._trace_region = None
 
     def get_default_model(self) -> str:
         return self._inner.get_default_model()
+
+    def set_trace_context(self, parent_run, region_name: str) -> None:
+        """Set active trace context for the next LLM call."""
+        self._trace_parent = parent_run
+        self._trace_region = region_name
+
+    def clear_trace_context(self) -> None:
+        """Clear trace context."""
+        self._trace_parent = None
+        self._trace_region = None
 
     async def chat(
         self,
@@ -44,6 +56,8 @@ class MyelinatedProvider(LLMProvider):
             "model": model,
             "max_tokens": max_tokens,
             "temperature": temperature,
+            "trace_parent": self._trace_parent,
+            "trace_region": self._trace_region,
         })
 
         async def core(ctx: MiddlewareContext) -> MiddlewareContext:
