@@ -173,6 +173,9 @@ class ProcessingPipeline:
         self._emitter = emitter
         self.predictor = Predictor()  # Predictive coding (Friston 2005)
 
+        self._current_trace_run = None
+        self._current_phase_run = None
+
         # Dreaming engine (Diekelmann & Born 2010) — recall-based promotion
         from brain_agent.memory.dreaming import DreamingEngine
         self.dreaming = DreamingEngine(tracker=self.memory.recall_tracker, mode="core")
@@ -196,6 +199,40 @@ class ProcessingPipeline:
             self.hypothalamus, self.vta, self.brainstem_region,
         ]
 
+    def _set_llm_trace(self, phase_run, region_name: str) -> None:
+        """Set trace context on LLM provider for the next region call."""
+        if phase_run and hasattr(self._llm_provider, "set_trace_context"):
+            self._llm_provider.set_trace_context(phase_run, region_name)
+
+    def _clear_llm_trace(self) -> None:
+        """Clear trace context on LLM provider."""
+        if hasattr(self._llm_provider, "clear_trace_context"):
+            self._llm_provider.clear_trace_context()
+
+    def _start_phase(self, name: str, inputs: dict | None = None) -> object | None:
+        """Create a phase-level trace child run."""
+        if self._current_trace_run:
+            try:
+                run = self._current_trace_run.create_child(
+                    name=name, run_type="chain",
+                    inputs=inputs or {}, extra={},
+                )
+                self._current_phase_run = run
+                return run
+            except Exception:
+                logger.warning("Failed to create phase trace: %s", name)
+        return None
+
+    def _end_phase(self, run, outputs: dict | None = None) -> None:
+        """End a phase-level trace run."""
+        if run:
+            try:
+                run.end(outputs=outputs or {})
+                run.post()
+            except Exception:
+                logger.warning("Failed to end phase trace")
+        self._current_phase_run = None
+
     async def _execute_through_barrier(
         self, tool_name: str, tool_params: dict,
     ) -> str:
@@ -206,6 +243,18 @@ class ProcessingPipeline:
         scans for pathogenic input.  If no barrier is configured the
         tool executes directly — an empty chain is transparent.
         """
+        tool_run = None
+        if self._current_phase_run:
+            try:
+                tool_run = self._current_phase_run.create_child(
+                    name=f"tool.{tool_name}",
+                    run_type="tool",
+                    inputs={"tool_name": tool_name, "params": tool_params},
+                    extra={},
+                )
+            except Exception:
+                logger.warning("Failed to create tool trace: %s", tool_name)
+
         if self._barrier_mw:
             ctx = MiddlewareContext(data={
                 "tool_name": tool_name,
@@ -219,8 +268,18 @@ class ProcessingPipeline:
                 return c
 
             ctx = await self._barrier_mw.execute(ctx, _core)
-            return ctx.get("result", "")
-        return await self.tool_registry.execute(tool_name, tool_params)
+            result = ctx.get("result", "")
+        else:
+            result = await self.tool_registry.execute(tool_name, tool_params)
+
+        if tool_run:
+            try:
+                tool_run.end(outputs={"result": str(result)[:1000]})
+                tool_run.post()
+            except Exception:
+                logger.warning("Failed to end tool trace: %s", tool_name)
+
+        return result
 
     _PSC_SYSTEM_PROMPT = (
         "You are the Post-Synaptic Consolidation processor — the brain's sleep-replay system "
@@ -522,15 +581,20 @@ class ProcessingPipeline:
     # MAIN ENTRY POINT
     # ==================================================================
 
-    async def process_request(self, text: str = "", image: bytes | None = None, audio: bytes | None = None) -> PipelineResult:
+    async def process_request(self, text: str = "", image: bytes | None = None, audio: bytes | None = None, trace_run=None) -> PipelineResult:
         """Process a single user request through the 7-phase neural pipeline."""
         result = PipelineResult()
         signals_count = 0
+
+        self._current_trace_run = trace_run
+        self._current_phase_run = None
 
         # ══════════════════════════════════════════════════════════════
         # Phase 1: Sensory Input (Sherman & Guillery 2006)
         # Thalamus relays → V1/A1 sensory cortices
         # ══════════════════════════════════════════════════════════════
+
+        _phase1_run = self._start_phase("phase.1_sensory_input", inputs={"text": text[:200]})
 
         # Determine input modality — this affects processing throughout the pipeline
         # (Hickok & Poeppel 2007: visual and auditory use different dual streams)
@@ -628,6 +692,8 @@ class ProcessingPipeline:
         except Exception:
             pass  # Prediction is best-effort
 
+        self._end_phase(_phase1_run, outputs={"input_modality": input_modality})
+
         # ══════════════════════════════════════════════════════════════
         # Phase 2+3: Dual-Stream + Integration
         # Modality-specific dual streams (Hickok & Poeppel 2007):
@@ -645,6 +711,8 @@ class ProcessingPipeline:
         #        ∥ Amygdala (limbic: threat/reward visual evaluation)
         #        → pSTS merge
         # ══════════════════════════════════════════════════════════════
+
+        _phase23_run = self._start_phase("phase.2_3_dual_stream_integration", inputs={"text": text[:200]})
 
         # ── Phase 2: Structural analysis (algorithmic, no LLM) ──
         # Deep comprehension + appraisal deferred to Cortical Integration (Phase 6).
@@ -831,10 +899,14 @@ class ProcessingPipeline:
         wm_item = WorkingMemoryItem(content=text, slot="phonological", metadata=wm_meta)
         self.memory.working.load(wm_item)
 
+        self._end_phase(_phase23_run, outputs={"comprehension_intent": comprehension.get("intent", "")})
+
         # ══════════════════════════════════════════════════════════════
         # Phase 6: Retrieval (Squire 2004, Tulving 2002)
         # Hippocampus + PFC + Angular Gyrus pattern completion
         # ══════════════════════════════════════════════════════════════
+
+        _phase6_run = self._start_phase("phase.6_retrieval", inputs={"query": text[:200]})
 
         wm_context = self.memory.working.get_context()
         retrieved = await self.memory.retrieve(
@@ -936,10 +1008,14 @@ class ProcessingPipeline:
         await self._emit("region_processing", "pipeline", "routing",
             f"Processing depth: {processing_depth}")
 
+        self._end_phase(_phase6_run, outputs={"memories_retrieved": len(retrieved)})
+
         # ══════════════════════════════════════════════════════════════
         # Executive Processing with Recurrent Loop (Lamme 2006)
         # PFC → ACC → [confidence check] → re-PFC if needed
         # ══════════════════════════════════════════════════════════════
+
+        _phase7_run = self._start_phase("phase.7_executive", inputs={"processing_depth": processing_depth})
 
         plan_signal = None
         conflict = None
@@ -949,6 +1025,7 @@ class ProcessingPipeline:
             # (Pessoa 2008: unified cortical processing)
             pfc_before = input_signal
 
+            self._set_llm_trace(_phase7_run, "pfc")
             if self.pfc.llm_provider:
                 cortical_prompt = self.pfc.build_cortical_system_prompt(
                     upstream_context=input_signal.metadata.get("upstream_context", {}),
@@ -1617,6 +1694,10 @@ class ProcessingPipeline:
         _hypo_result_ref[0] = hypo_result  # Pass to background task
 
         self.neuro_ctrl.on_system_state(pending_requests=0, error_rate=min(1.0, error_rate))
+
+        self._end_phase(_phase7_run, outputs={"response_length": len(result.response)})
+        self._clear_llm_trace()
+        self._current_trace_run = None
 
         # ── Return response IMMEDIATELY ──
         # Phase 4 (encoding), KG storage, Phase 5 (consolidation),
