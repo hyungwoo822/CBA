@@ -104,7 +104,7 @@ brain-agent memory stats   # Memory statistics
 flowchart TB
     UserInput([User Input]):::inputStyle
 
-    subgraph Phase1["&nbsp;Phase 1: SENSORY INPUT &nbsp;<br/><i>Sherman & Guillery 2006</i>&nbsp;"]
+    subgraph Phase1["&nbsp;Phase 1: SENSORY INPUT &nbsp;"]
         direction LR
         Thalamus[Thalamus<br/>relay]:::sensoryStyle
         VisCtx[Vis Crtx<br/>Aud L+R]:::sensoryStyle
@@ -154,7 +154,7 @@ flowchart TB
         BrocaLLM --> MotorCortex
     end
 
-    subgraph Phase6["&nbsp;Phase 6: RETRIEVAL&nbsp;<br/><i>Squire 2004</i>&nbsp;"]
+    subgraph Phase6["&nbsp;Phase 6: RETRIEVAL&nbsp;"]
         direction LR
         RetrievalEngine[Retrieval<br/>Engine]:::retrievalStyle
         ProceduralCache[Procedural<br/>Cache]:::retrievalStyle
