@@ -1,0 +1,106 @@
+%%{init: {'theme':'base', 'themeVariables': {
+  'primaryColor': '#F5F1E4',
+  'primaryTextColor': '#5C5847',
+  'primaryBorderColor': '#A8A078',
+  'lineColor': '#B8A5C9',
+  'secondaryColor': '#E8DFF0',
+  'tertiaryColor': '#F0E8D8',
+  'fontFamily': 'Georgia, serif'
+}}}%%
+flowchart TB
+    UserInput([User Input]):::inputStyle
+
+    subgraph Phase1["&nbsp;Phase 1: SENSORY INPUT &nbsp;<br/><i>Sherman & Guillery 2006</i>&nbsp;"]
+        direction LR
+        Thalamus[Thalamus<br/>relay]:::sensoryStyle
+        VisCtx[Vis Crtx<br/>Aud L+R]:::sensoryStyle
+        SensoryBuffer[Sensory<br/>Buffer]:::sensoryStyle
+        Thalamus --> VisCtx --> SensoryBuffer
+    end
+
+    subgraph Phase23["&nbsp;Phase 2+3: DUAL STREAMS + INTEGRATION&nbsp;<br/><i>Hickok & Poeppel 2007</i>&nbsp;"]
+        direction TB
+        subgraph Ventral["Ventral Stream semantic"]
+            Wernicke[Wernicke LLM<br/>comprehension]:::ventralStyle
+            Amygdala[Amygdala LLM<br/>R=fast, L=ctx]:::ventralStyle
+        end
+        pSTS{{pSTS merge}}:::mergeStyle
+        subgraph Dorsal["Dorsal Stream motor"]
+            Spt[Spt<br/>auditory-motor]:::dorsalStyle
+        end
+        Wernicke --> pSTS
+        Amygdala --> pSTS
+        Spt --> pSTS
+    end
+
+    subgraph Executive["&nbsp;EXECUTIVE PROCESSING&nbsp;"]
+        direction LR
+        PFC[PFC<br/>LLM]:::execStyle
+        CorpCall[Corp<br/>Call]:::execStyle
+        ACC[ACC]:::execStyle
+        Salience[Salience<br/>Network]:::execStyle
+        PFC --> CorpCall --> ACC --> Salience
+    end
+
+    subgraph Subcortical["&nbsp;Subcortical Loop&nbsp;"]
+        direction LR
+        BG[BG]:::subcortStyle
+        Cereb[Cereb]:::subcortStyle
+        WorkingMem[Working<br/>Memory]:::subcortStyle
+        VTA_DA[VTA DA]:::subcortStyle
+        BG --> Cereb
+        Cereb --> WorkingMem
+        WorkingMem --> VTA_DA
+    end
+
+    subgraph Phase7["&nbsp;Phase 7: SPEECH PRODUCTION&nbsp;<br/><i>Levelt 1989</i>&nbsp;"]
+        direction LR
+        BrocaLLM[Broca LLM<br/>production]:::speechStyle
+        MotorCortex[Motor Cortex<br/>M1]:::speechStyle
+        BrocaLLM --> MotorCortex
+    end
+
+    subgraph Phase6["&nbsp;Phase 6: RETRIEVAL&nbsp;<br/><i>Squire 2004</i>&nbsp;"]
+        direction LR
+        RetrievalEngine[Retrieval<br/>Engine]:::retrievalStyle
+        ProceduralCache[Procedural<br/>Cache]:::retrievalStyle
+        RetrievalEngine --> ProceduralCache
+    end
+
+    subgraph Neuromod["&nbsp;NEUROMODULATOR SYSTEM&nbsp;"]
+        direction LR
+        VTA[VTA DA]:::neuromodStyle
+        Hypothalamus[Hypothalamus<br/>Homeostasis]:::neuromodStyle
+        LC[LC<br/>NE]:::neuromodStyle
+        Raphe[Raphe Nuclei<br/>5-HT]:::neuromodStyle
+        NucleusBasalis[Nucleus Basalis<br/>ACh]:::neuromodStyle
+    end
+
+    MemorySystem[/MEMORY SYSTEM<br/>6-layer CLS<br/><i>McClelland 1995</i>/]:::memoryStyle
+
+    UserInput --> Thalamus
+    SensoryBuffer --> Wernicke
+    SensoryBuffer --> Amygdala
+    SensoryBuffer --> Spt
+    pSTS --> Salience
+    Salience --> PFC
+    ACC --> BG
+    VTA_DA --> PFC
+    PFC --> BrocaLLM
+    Phase6 --> Executive
+    Neuromod -.modulates.-> Executive
+    Neuromod -.modulates.-> Phase23
+    MemorySystem -.stores.-> Phase6
+    Neuromod --> MemorySystem
+
+    classDef inputStyle fill:#F5E8D3,stroke:#B8A078,stroke-width:2px,color:#5C5847
+    classDef sensoryStyle fill:#E8DFF0,stroke:#B8A5C9,stroke-width:2px,color:#5C4A6B
+    classDef ventralStyle fill:#DDE5D0,stroke:#A8B590,stroke-width:2px,color:#4A5238
+    classDef dorsalStyle fill:#E0D5E8,stroke:#B09BC4,stroke-width:2px,color:#5C4A6B
+    classDef mergeStyle fill:#F0E0D8,stroke:#C4A898,stroke-width:3px,color:#5C3E2E
+    classDef execStyle fill:#E5DCE8,stroke:#B09BC4,stroke-width:2px,color:#4A3858
+    classDef subcortStyle fill:#F0EAD8,stroke:#B8AC80,stroke-width:2px,color:#5C5030
+    classDef speechStyle fill:#DDE5D0,stroke:#A8B590,stroke-width:2px,color:#4A5238
+    classDef retrievalStyle fill:#E8DFF0,stroke:#B8A5C9,stroke-width:2px,color:#5C4A6B
+    classDef neuromodStyle fill:#F5E8D8,stroke:#C4B088,stroke-width:2px,color:#5C4A30
+    classDef memoryStyle fill:#EADFEC,stroke:#B8A0C0,stroke-width:3px,color:#4A3858
