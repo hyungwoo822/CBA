@@ -13,11 +13,23 @@ export function resetAllPositions() {
   resetListeners.forEach((fn) => fn())
 }
 
-export function useDraggable(id: string, defaultX: number, defaultY: number) {
+export function useDraggable(
+  id: string,
+  defaultX: number,
+  defaultY: number,
+  resetKey?: string | number,
+) {
   const [pos, setPos] = useState(savedPositions[id] || { x: defaultX, y: defaultY })
   const dragging = useRef(false)
   const dragStart = useRef({ x: 0, y: 0 })
   const posStart = useRef({ x: 0, y: 0 })
+
+  useEffect(() => {
+    if (resetKey === undefined) return
+    const next = { x: defaultX, y: defaultY }
+    setPos(next)
+    savedPositions[id] = next
+  }, [defaultX, defaultY, id, resetKey])
 
   // Listen for global reset
   useEffect(() => {

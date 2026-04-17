@@ -1069,12 +1069,12 @@ body {
   opacity: 0.72;
 }
 .top-chip-menu {
-  position: absolute; top: calc(100% + 6px); left: 0;
+  position: fixed;
   min-width: 200px; padding: 6px;
   background: rgba(24,24,38,0.98); backdrop-filter: blur(20px);
   border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-  z-index: 300;
+  z-index: 1200;
 }
 .top-chip-menu-item {
   display: block; width: 100%; padding: 6px 10px;
@@ -1090,6 +1090,12 @@ body {
 .top-chip-menu-item.active {
   background: rgba(59,130,246,0.1);
   color: #60a5fa;
+}
+.top-chip-menu-empty {
+  padding: 6px 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: var(--font-ui);
 }
 
 /* ──────────────────────────────────────

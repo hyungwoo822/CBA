@@ -172,11 +172,25 @@ function App() {
   const [inboxOpen, setInboxOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [modelSelectorOpen, setModelSelectorOpen] = useState(false)
+  const [modelSelectorAnchor, setModelSelectorAnchor] = useState<{ x: number; y: number } | null>(null)
+  const [modelSelectorAnchorKey, setModelSelectorAnchorKey] = useState(0)
 
   useEffect(() => {
     ;(window as any).__setInboxOpen = setInboxOpen
     ;(window as any).__setExportOpen = setExportOpen
-    ;(window as any).__setModelSelectorOpen = setModelSelectorOpen
+    ;(window as any).__setModelSelectorOpen = (
+      value: boolean | { open?: boolean; anchor?: { x: number; y: number } },
+    ) => {
+      if (typeof value === 'object' && value !== null) {
+        if (value.anchor) {
+          setModelSelectorAnchor(value.anchor)
+          setModelSelectorAnchorKey((current) => current + 1)
+        }
+        setModelSelectorOpen(value.open ?? true)
+        return
+      }
+      setModelSelectorOpen(value)
+    }
     return () => {
       delete (window as any).__setInboxOpen
       delete (window as any).__setExportOpen
@@ -274,7 +288,12 @@ function App() {
       <KnowledgeGraphModal />
       <CurationInbox open={inboxOpen} onClose={() => setInboxOpen(false)} />
       <ExportPreviewModal open={exportOpen} onClose={() => setExportOpen(false)} />
-      <ModelSelector open={modelSelectorOpen} onClose={() => setModelSelectorOpen(false)} />
+      <ModelSelector
+        open={modelSelectorOpen}
+        onClose={() => setModelSelectorOpen(false)}
+        anchor={modelSelectorAnchor}
+        anchorKey={modelSelectorAnchorKey}
+      />
       <InteractionModeToggle />
     </div>
   )

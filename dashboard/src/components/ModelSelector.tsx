@@ -10,9 +10,13 @@ const STAGES: Stage[] = ['triage', 'extract', 'temporal', 'refine']
 export function ModelSelector({
   open,
   onClose,
+  anchor,
+  anchorKey,
 }: {
   open: boolean
   onClose: () => void
+  anchor?: { x: number; y: number } | null
+  anchorKey?: number
 }) {
   const defaultModel = useBrainStore((s) => s.defaultModel)
   const models = useBrainStore((s) => s.availableModels)
@@ -23,7 +27,9 @@ export function ModelSelector({
     temporal: 'auto',
     refine: 'auto',
   })
-  const { style, onMouseDown } = useModalDrag('model-selector', window.innerWidth - 380, 80)
+  const defaultX = anchor?.x ?? window.innerWidth - 380
+  const defaultY = anchor?.y ?? 80
+  const { style, onMouseDown } = useModalDrag('model-selector', defaultX, defaultY, anchorKey)
 
   useEffect(() => {
     if (!open) return

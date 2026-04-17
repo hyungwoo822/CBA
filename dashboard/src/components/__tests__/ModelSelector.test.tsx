@@ -57,4 +57,17 @@ describe('ModelSelector frame', () => {
     closeBtn.click()
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+
+  it('uses the provided anchor position when opened from the Models chip', async () => {
+    render(
+      <ModelSelector
+        open={true}
+        onClose={() => {}}
+        anchor={{ x: 220, y: 48 }}
+        anchorKey={1}
+      />,
+    )
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
+    expect(document.querySelector('.kl-modal')).toHaveStyle({ left: '220px', top: '48px' })
+  })
 })

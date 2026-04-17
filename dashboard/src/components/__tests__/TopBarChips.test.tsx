@@ -50,6 +50,11 @@ describe('TopBarChips', () => {
     fireEvent.click(screen.getByRole('button', { name: /Export/i }))
     expect((window as any).__setExportOpen).toHaveBeenCalledWith(true)
     fireEvent.click(screen.getByRole('button', { name: /Models/i }))
-    expect((window as any).__setModelSelectorOpen).toHaveBeenCalledWith(true)
+    expect((window as any).__setModelSelectorOpen).toHaveBeenCalledWith(
+      expect.objectContaining({
+        open: true,
+        anchor: expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }),
+      }),
+    )
   })
 })

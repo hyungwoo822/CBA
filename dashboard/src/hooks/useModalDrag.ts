@@ -6,8 +6,13 @@ import { useDraggable } from './useDraggable'
  * needed for a .kl-modal. The modal root gets { style, onMouseDown }; the
  * header gets data-drag-handle so dragging starts only from the header.
  */
-export function useModalDrag(id: string, defaultX: number, defaultY: number) {
-  const { pos, onMouseDown } = useDraggable(id, defaultX, defaultY)
+export function useModalDrag(
+  id: string,
+  defaultX: number,
+  defaultY: number,
+  resetKey?: string | number,
+) {
+  const { pos, onMouseDown } = useDraggable(id, defaultX, defaultY, resetKey)
   const style: CSSProperties = { left: pos.x, top: pos.y }
   return { style, onMouseDown }
 }

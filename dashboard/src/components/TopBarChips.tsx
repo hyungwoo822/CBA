@@ -1,3 +1,4 @@
+import type { MouseEvent } from 'react'
 import { useBrainStore } from '../stores/brainState'
 import { WorkspaceSelector } from './WorkspaceSelector'
 
@@ -7,6 +8,16 @@ export function TopBarChips() {
     s.openQuestions.filter((q) => q.severity === 'severe').length +
     s.contradictions.filter((c) => c.severity === 'severe').length
   )
+  const openModels = (event: MouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    ;(window as any).__setModelSelectorOpen?.({
+      open: true,
+      anchor: {
+        x: Math.max(8, Math.min(rect.right + 8, window.innerWidth - 372)),
+        y: Math.max(8, rect.top),
+      },
+    })
+  }
 
   return (
     <div className="top-chip-row">
@@ -36,7 +47,7 @@ export function TopBarChips() {
       <button
         type="button"
         className="top-chip"
-        onClick={() => { (window as any).__setModelSelectorOpen?.(true) }}
+        onClick={openModels}
         title="LLM models"
       >
         Models
