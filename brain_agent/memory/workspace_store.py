@@ -93,12 +93,17 @@ class WorkspaceStore:
     async def get_workspace(self, name_or_id: str) -> dict | None:
         assert self._db is not None
         self._db.row_factory = aiosqlite.Row
+        lookup_id = (
+            PERSONAL_WORKSPACE_ID
+            if name_or_id == PERSONAL_WORKSPACE_NAME
+            else name_or_id
+        )
         async with self._db.execute(
             "SELECT * FROM workspaces WHERE id = ? OR name = ?",
-            (name_or_id, name_or_id),
+            (lookup_id, name_or_id),
         ) as cur:
             row = await cur.fetchone()
-        return dict(row) if row else None
+        return _workspace_from_row(row) if row else None
 
     async def list_workspaces(self) -> list[dict]:
         assert self._db is not None
@@ -107,7 +112,7 @@ class WorkspaceStore:
             "SELECT * FROM workspaces ORDER BY created_at"
         ) as cur:
             rows = await cur.fetchall()
-        return [dict(row) for row in rows]
+        return [_workspace_from_row(row) for row in rows]
 
     async def update_workspace(self, ws_id: str, **fields) -> None:
         assert self._db is not None
@@ -207,3 +212,10 @@ class WorkspaceStore:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _workspace_from_row(row: aiosqlite.Row) -> dict:
+    workspace = dict(row)
+    if workspace.get("id") == PERSONAL_WORKSPACE_ID:
+        workspace["name"] = PERSONAL_WORKSPACE_NAME
+    return workspace

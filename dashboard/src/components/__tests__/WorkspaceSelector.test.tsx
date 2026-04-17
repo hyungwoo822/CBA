@@ -55,4 +55,15 @@ describe('WorkspaceSelector', () => {
     fireEvent.click(screen.getByTestId('workspace-selector-btn'))
     expect(within(screen.getByRole('menu')).getByText('Personal Knowledge')).toBeInTheDocument()
   })
+
+  it('normalizes the personal workspace name returned by the API', () => {
+    useBrainStore.setState({
+      workspaces: [{ id: 'personal', name: 'personal', decay_policy: 'normal' }],
+      currentWorkspace: { id: 'personal', name: 'personal', decay_policy: 'normal' },
+    })
+    render(<WorkspaceSelector />)
+    expect(screen.getByTestId('workspace-selector-btn')).toHaveTextContent('Personal Knowledge')
+    fireEvent.click(screen.getByTestId('workspace-selector-btn'))
+    expect(within(screen.getByRole('menu')).getByText('Personal Knowledge')).toBeInTheDocument()
+  })
 })

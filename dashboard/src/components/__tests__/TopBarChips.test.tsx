@@ -28,6 +28,7 @@ describe('TopBarChips', () => {
     const { container } = render(<TopBarChips />)
     expect(container.querySelector('.top-chip-row')).toBeTruthy()
     expect(screen.getByTestId('workspace-selector-btn')).toBeTruthy()
+    expect(screen.getByTestId('workspace-selector-btn')).toHaveTextContent('Personal Knowledge')
     expect(screen.getByRole('button', { name: /Inbox/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Export/i })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Models/i })).toBeTruthy()

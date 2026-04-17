@@ -20,6 +20,18 @@ async def test_personal_workspace_auto_created(store):
     assert ws["decay_policy"] == "normal"
 
 
+async def test_existing_personal_workspace_name_is_canonicalized(store):
+    await store.update_workspace("personal", name="personal")
+
+    ws = await store.get_workspace("personal")
+    by_name = await store.get_workspace("Personal Knowledge")
+    items = await store.list_workspaces()
+
+    assert ws["name"] == "Personal Knowledge"
+    assert by_name["id"] == "personal"
+    assert "Personal Knowledge" in {workspace["name"] for workspace in items}
+
+
 async def test_create_workspace(store):
     ws = await store.create_workspace(
         name="Billing Service",

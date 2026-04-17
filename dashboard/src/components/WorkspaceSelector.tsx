@@ -9,17 +9,28 @@ const PERSONAL_WORKSPACE: Workspace = {
   decay_policy: 'normal',
 }
 
+function normalizeWorkspace(workspace: Workspace): Workspace {
+  if (workspace.id !== PERSONAL_WORKSPACE.id) return workspace
+  return {
+    ...workspace,
+    name: PERSONAL_WORKSPACE.name,
+    decay_policy: workspace.decay_policy || PERSONAL_WORKSPACE.decay_policy,
+  }
+}
+
 export function WorkspaceSelector() {
   const { current, workspaces, setCurrent } = useWorkspace()
   const [open, setOpen] = useState(false)
   const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0, width: 200 })
   const buttonRef = useRef<HTMLButtonElement>(null)
+  const normalizedWorkspaces = workspaces.map(normalizeWorkspace)
   const displayCurrent = current
-    || workspaces.find((workspace) => workspace.id === PERSONAL_WORKSPACE.id)
+    ? normalizeWorkspace(current)
+    : normalizedWorkspaces.find((workspace) => workspace.id === PERSONAL_WORKSPACE.id)
     || PERSONAL_WORKSPACE
   const options = [
     displayCurrent,
-    ...workspaces.filter((workspace) => workspace.id !== displayCurrent.id),
+    ...normalizedWorkspaces.filter((workspace) => workspace.id !== displayCurrent.id),
   ]
 
   const toggleOpen = () => {
