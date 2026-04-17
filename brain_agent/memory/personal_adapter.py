@@ -64,4 +64,51 @@ class PersonalAdapter:
             confidence=confidence,
         )
 
-    # Forward API (render_as_nodes, write_from_nodes) is added in Task 2/3.
+    # ------------------------------------------------------------------
+    # Workspace-node forward API
+    # ------------------------------------------------------------------
+
+    async def render_as_nodes(
+        self,
+        workspace_id: str = PERSONAL_WORKSPACE_ID,
+    ) -> list[dict]:
+        """Render identity_facts as Person nodes for the personal workspace.
+
+        Returns at most two nodes: one for the user and one for the agent.
+        Each node collapses all facts of its fact_type into a properties dict.
+        Non-personal workspace ids return an empty list because identity_facts
+        is a personal-workspace artifact only.
+        """
+        if workspace_id != PERSONAL_WORKSPACE_ID:
+            return []
+
+        nodes: list[dict] = []
+        for fact_type, label in _FACT_TYPE_TO_LABEL.items():
+            facts = await self._semantic.get_identity_facts(fact_type)
+            if not facts:
+                continue
+
+            properties: dict[str, str] = {}
+            property_meta: dict[str, dict] = {}
+            for fact in facts:
+                key = fact["key"]
+                properties[key] = fact["value"]
+                property_meta[key] = {
+                    "confidence": fact.get("confidence", 1.0),
+                    "source": fact.get("source", "unknown"),
+                    "updated_at": fact.get("updated_at", ""),
+                }
+
+            nodes.append(
+                {
+                    "type": "Person",
+                    "label": label,
+                    "workspace_id": PERSONAL_WORKSPACE_ID,
+                    "properties": properties,
+                    "property_meta": property_meta,
+                }
+            )
+
+        return nodes
+
+    # write_from_nodes is added in Task 3.

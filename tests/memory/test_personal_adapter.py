@@ -62,3 +62,67 @@ async def test_add_user_fact_upsert_semantics(adapter, memory_manager):
     assert len(facts) == 1
     assert facts[0]["value"] == "Alicia"
     assert facts[0]["confidence"] == pytest.approx(0.9)
+
+
+async def test_render_as_nodes_returns_user_node(adapter, memory_manager):
+    """user_model facts collapse into a single Person/label='user' node."""
+    await memory_manager.semantic.add_identity_fact("user_model", "name", "Alice")
+    await memory_manager.semantic.add_identity_fact("user_model", "city", "Seoul")
+    nodes = await adapter.render_as_nodes()
+
+    user_nodes = [n for n in nodes if n["label"] == "user"]
+    assert len(user_nodes) == 1
+    user = user_nodes[0]
+    assert user["type"] == "Person"
+    assert user["label"] == "user"
+    assert user["workspace_id"] == PERSONAL_WORKSPACE_ID
+    assert user["properties"] == {"city": "Seoul", "name": "Alice"}
+    assert set(user["property_meta"].keys()) == {"name", "city"}
+    assert "confidence" in user["property_meta"]["name"]
+
+
+async def test_render_as_nodes_returns_agent_node(adapter, memory_manager):
+    await memory_manager.semantic.add_identity_fact("self_model", "role", "assistant")
+    nodes = await adapter.render_as_nodes()
+
+    agent_nodes = [n for n in nodes if n["label"] == "agent"]
+    assert len(agent_nodes) == 1
+    agent = agent_nodes[0]
+    assert agent["type"] == "Person"
+    assert agent["label"] == "agent"
+    assert agent["properties"] == {"role": "assistant"}
+
+
+async def test_render_as_nodes_returns_both_when_present(adapter, memory_manager):
+    await memory_manager.semantic.add_identity_fact("user_model", "name", "Alice")
+    await memory_manager.semantic.add_identity_fact("self_model", "role", "assistant")
+    nodes = await adapter.render_as_nodes()
+    labels = {n["label"] for n in nodes}
+    assert labels == {"user", "agent"}
+
+
+async def test_render_as_nodes_empty_when_no_facts(adapter):
+    """No identity_facts means no nodes, not empty-properties nodes."""
+    nodes = await adapter.render_as_nodes()
+    assert nodes == []
+
+
+async def test_render_as_nodes_empty_for_non_personal_workspace(
+    adapter, memory_manager,
+):
+    """Adapter is bound to personal; business workspaces return []."""
+    biz = await memory_manager.workspace.create_workspace(name="Billing Service")
+    await memory_manager.semantic.add_identity_fact("user_model", "name", "Alice")
+    nodes = await adapter.render_as_nodes(workspace_id=biz["id"])
+    assert nodes == []
+
+
+async def test_render_as_nodes_default_workspace_id_is_personal(
+    adapter, memory_manager,
+):
+    """Calling render_as_nodes() with no argument defaults to personal."""
+    await memory_manager.semantic.add_identity_fact("user_model", "name", "Alice")
+    nodes_default = await adapter.render_as_nodes()
+    nodes_explicit = await adapter.render_as_nodes(workspace_id=PERSONAL_WORKSPACE_ID)
+    assert nodes_default == nodes_explicit
+    assert len(nodes_default) == 1
