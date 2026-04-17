@@ -100,7 +100,7 @@ class RecallEntry:
         "key", "content_preview", "source", "recall_count",
         "total_score", "max_score", "first_recalled_at",
         "last_recalled_at", "query_hashes", "recall_days",
-        "concept_tags", "promoted_at",
+        "concept_tags", "promoted_at", "origin_workspace_id",
     )
 
     def __init__(
@@ -121,6 +121,7 @@ class RecallEntry:
         self.recall_days: list[str] = []
         self.concept_tags: list[str] = []
         self.promoted_at: str | None = None
+        self.origin_workspace_id: str = "personal"
 
     def record_recall(self, query: str, score: float) -> None:
         now = datetime.now(timezone.utc).isoformat()
@@ -166,6 +167,7 @@ class RecallEntry:
             "recall_days": self.recall_days,
             "concept_tags": self.concept_tags,
             "promoted_at": self.promoted_at,
+            "origin_workspace_id": self.origin_workspace_id,
         }
 
     @classmethod
@@ -184,6 +186,7 @@ class RecallEntry:
         entry.recall_days = data.get("recall_days", [])
         entry.concept_tags = data.get("concept_tags", [])
         entry.promoted_at = data.get("promoted_at", None)
+        entry.origin_workspace_id = data.get("origin_workspace_id", "personal")
         return entry
 
 
@@ -210,11 +213,20 @@ class RecallTracker:
         except Exception as e:
             logger.warning("RecallTracker: failed to load store: %s", e)
 
-    def record(self, memory_id: str, content: str, query: str, score: float, source: str = "memory") -> None:
+    def record(
+        self,
+        memory_id: str,
+        content: str,
+        query: str,
+        score: float,
+        source: str = "memory",
+        workspace_id: str = "personal",
+    ) -> None:
         self._ensure_loaded()
         key = f"{source}:{memory_id}"
         if key not in self._entries:
             self._entries[key] = RecallEntry(key=key, content_preview=content, source=source)
+            self._entries[key].origin_workspace_id = workspace_id
         self._entries[key].record_recall(query, score)
 
     def save(self) -> None:

@@ -23,6 +23,7 @@ class SemanticStore:
         self._embed_fn = embed_fn
         self._collection = None
         self._graph_db: aiosqlite.Connection | None = None
+        self._workspace_store = None
 
     async def initialize(self):
         client = chromadb.PersistentClient(path=self._chroma_path)
@@ -332,8 +333,14 @@ class SemanticStore:
                    source_ref = COALESCE(excluded.source_ref, knowledge_graph.source_ref),
                    valid_from = COALESCE(excluded.valid_from, knowledge_graph.valid_from),
                    epistemic_source = excluded.epistemic_source,
-                   importance_score = excluded.importance_score,
-                   never_decay = excluded.never_decay""",
+                   importance_score = MAX(
+                       COALESCE(knowledge_graph.importance_score, 0.5),
+                       COALESCE(excluded.importance_score, 0.5)
+                   ),
+                   never_decay = MAX(
+                       COALESCE(knowledge_graph.never_decay, 0),
+                       COALESCE(excluded.never_decay, 0)
+                   )""",
             (
                 str(uuid.uuid4()),
                 source,
@@ -385,6 +392,53 @@ class SemanticStore:
                 "source": r[1],
                 "relation": r[2],
                 "target": r[3],
+                "weight": r[4],
+                "category": r[5],
+                "occurrence_count": r[6],
+                "origin": r[7],
+                "confidence": r[8],
+                "workspace_id": r[9],
+                "target_workspace_id": r[10],
+                "source_ref": r[11],
+                "valid_from": r[12],
+                "valid_to": r[13],
+                "superseded_by": r[14],
+                "epistemic_source": r[15],
+                "importance_score": r[16],
+                "never_decay": r[17],
+            }
+            for r in rows
+        ]
+
+    async def get_edges(
+        self,
+        workspace_id: str | None = None,
+    ) -> list[dict]:
+        """Return knowledge graph edges with raw source/target column names."""
+        select = (
+            "SELECT id, source_node, relation, target_node, weight, category, "
+            "occurrence_count, origin, confidence, workspace_id, "
+            "target_workspace_id, source_ref, valid_from, valid_to, "
+            "superseded_by, epistemic_source, importance_score, never_decay "
+            "FROM knowledge_graph "
+        )
+        if workspace_id is None:
+            sql = select + "ORDER BY source_node, relation, target_node"
+            args: tuple = ()
+        else:
+            sql = (
+                select
+                + "WHERE workspace_id = ? ORDER BY source_node, relation, target_node"
+            )
+            args = (workspace_id,)
+        async with self._graph_db.execute(sql, args) as cursor:
+            rows = await cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "source_node": r[1],
+                "relation": r[2],
+                "target_node": r[3],
                 "weight": r[4],
                 "category": r[5],
                 "occurrence_count": r[6],
@@ -785,7 +839,11 @@ class SemanticStore:
     # Tononi & Cirelli 2003)
     # ------------------------------------------------------------------
 
-    async def prune_weak_edges(self, min_weight: float = 0.1) -> int:
+    async def prune_weak_edges(
+        self,
+        min_weight: float = 0.1,
+        workspace_id: str | None = None,
+    ) -> int:
         """Remove knowledge graph edges below the weight threshold.
 
         Neuroscience: synaptic pruning (Huttenlocher 1979) — weak
@@ -794,20 +852,56 @@ class SemanticStore:
 
         Returns the number of pruned edges.
         """
+        if workspace_id is not None:
+            async with self._graph_db.execute(
+                "SELECT COUNT(*) FROM knowledge_graph "
+                "WHERE workspace_id = ? AND weight < ? "
+                "AND COALESCE(never_decay, 0) = 0",
+                (workspace_id, min_weight),
+            ) as cursor:
+                count = (await cursor.fetchone())[0]
+            if count > 0:
+                await self._graph_db.execute(
+                    "DELETE FROM knowledge_graph "
+                    "WHERE workspace_id = ? AND weight < ? "
+                    "AND COALESCE(never_decay, 0) = 0",
+                    (workspace_id, min_weight),
+                )
+                await self._graph_db.commit()
+            return count
+
+        ws_store = getattr(self, "_workspace_store", None)
+        if ws_store is not None:
+            total = 0
+            for ws in await ws_store.list_workspaces():
+                if ws.get("decay_policy") == "none":
+                    continue
+                total += await self.prune_weak_edges(
+                    min_weight=min_weight,
+                    workspace_id=ws["id"],
+                )
+            return total
+
         async with self._graph_db.execute(
-            "SELECT COUNT(*) FROM knowledge_graph WHERE weight < ?",
+            "SELECT COUNT(*) FROM knowledge_graph "
+            "WHERE weight < ? AND COALESCE(never_decay, 0) = 0",
             (min_weight,),
         ) as cursor:
             count = (await cursor.fetchone())[0]
         if count > 0:
             await self._graph_db.execute(
-                "DELETE FROM knowledge_graph WHERE weight < ?",
+                "DELETE FROM knowledge_graph "
+                "WHERE weight < ? AND COALESCE(never_decay, 0) = 0",
                 (min_weight,),
             )
             await self._graph_db.commit()
         return count
 
-    async def decay_edge_weights(self, factor: float = 0.95) -> int:
+    async def decay_edge_weights(
+        self,
+        factor: float = 0.95,
+        workspace_id: str | None = None,
+    ) -> int:
         """Apply homeostatic scaling to all knowledge graph edges.
 
         Neuroscience: synaptic homeostasis (Tononi & Cirelli 2003).
@@ -816,12 +910,44 @@ class SemanticStore:
 
         Returns the number of affected edges.
         """
+        update_sql = (
+            "UPDATE knowledge_graph "
+            "SET weight = weight * "
+            "(1.0 - (1.0 - ?) * "
+            "(1.0 - COALESCE(importance_score, 0.5) * 0.5)) "
+        )
+        if workspace_id is not None:
+            cursor = await self._graph_db.execute(
+                update_sql
+                + "WHERE workspace_id = ? AND COALESCE(never_decay, 0) = 0",
+                (factor, workspace_id),
+            )
+            await self._graph_db.commit()
+            return cursor.rowcount or 0
+
+        ws_store = getattr(self, "_workspace_store", None)
+        if ws_store is not None:
+            total = 0
+            for ws in await ws_store.list_workspaces():
+                policy = ws.get("decay_policy", "normal")
+                if policy == "none":
+                    continue
+                ws_factor = 0.99 if policy == "slow" else factor
+                cursor = await self._graph_db.execute(
+                    update_sql
+                    + "WHERE workspace_id = ? AND COALESCE(never_decay, 0) = 0",
+                    (ws_factor, ws["id"]),
+                )
+                total += cursor.rowcount or 0
+            await self._graph_db.commit()
+            return total
+
         cursor = await self._graph_db.execute(
-            "UPDATE knowledge_graph SET weight = weight * ?",
+            update_sql + "WHERE COALESCE(never_decay, 0) = 0",
             (factor,),
         )
         await self._graph_db.commit()
-        return cursor.rowcount
+        return cursor.rowcount or 0
 
     async def mark_superseded(self, edge_id: str, valid_to: str) -> None:
         """Mark a knowledge graph edge as no longer current."""

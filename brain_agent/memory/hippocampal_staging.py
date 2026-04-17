@@ -44,16 +44,22 @@ class HippocampalStaging:
                 consolidated INTEGER DEFAULT 0,
                 last_interaction INTEGER DEFAULT 0,
                 last_session TEXT DEFAULT '',
-                workspace_id TEXT DEFAULT 'personal'
+                workspace_id TEXT DEFAULT 'personal',
+                importance_score REAL DEFAULT 0.5,
+                never_decay INTEGER DEFAULT 0
             )"""
         )
-        try:
-            await self._db.execute(
-                "ALTER TABLE staging_memories "
-                "ADD COLUMN workspace_id TEXT DEFAULT 'personal'"
-            )
-        except Exception:
-            pass
+        for col, defn in [
+            ("workspace_id", "TEXT DEFAULT 'personal'"),
+            ("importance_score", "REAL DEFAULT 0.5"),
+            ("never_decay", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                await self._db.execute(
+                    f"ALTER TABLE staging_memories ADD COLUMN {col} {defn}"
+                )
+            except Exception:
+                pass
         await self._db.execute(
             "UPDATE staging_memories SET workspace_id = 'personal' "
             "WHERE workspace_id IS NULL"
@@ -102,6 +108,9 @@ class HippocampalStaging:
         emotional_tag: dict | None = None,
         source_modality: str = "text",
         workspace_id: str = "personal",
+        strength: float = 1.0,
+        never_decay: int = 0,
+        importance_score: float = 0.5,
     ) -> str:
         mem_id = str(uuid.uuid4())
         embedding = self._embed_fn(content)
@@ -139,8 +148,9 @@ class HippocampalStaging:
             "INSERT INTO staging_memories "
             "(id, timestamp, content, context_embedding, entities, emotional_tag, "
             "source_modality, access_count, strength, consolidated, "
-            "last_interaction, last_session, workspace_id) "
-            "VALUES (?,?,?,?,?,?,?,0,1.0,0,?,?,?)",
+            "last_interaction, last_session, workspace_id, importance_score, "
+            "never_decay) "
+            "VALUES (?,?,?,?,?,?,?,0,?,0,?,?,?,?,?)",
             (
                 mem_id,
                 datetime.now(timezone.utc).isoformat(),
@@ -149,9 +159,12 @@ class HippocampalStaging:
                 json.dumps(entities),
                 json.dumps(tag),
                 source_modality,
+                strength,
                 interaction_id,
                 session_id,
                 workspace_id,
+                importance_score,
+                1 if never_decay else 0,
             ),
         )
         await self._db.commit()

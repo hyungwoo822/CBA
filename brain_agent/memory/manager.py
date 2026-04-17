@@ -130,6 +130,9 @@ class MemoryManager:
         await self.contradictions.initialize()
         await self.open_questions.initialize()
         await self.raw_vault.initialize()
+        self.consolidation._workspace_store = self.workspace
+        self.consolidation._ontology_store = self.ontology
+        self.semantic._workspace_store = self.workspace
 
     async def close(self) -> None:
         await self.staging.close()
@@ -218,8 +221,16 @@ class MemoryManager:
             if ex_emb:
                 sim = self._cosine_sim(embedding, ex_emb)
                 if sim > 0.85:
+                    decay_policy = await self.consolidation._get_decay_policy(
+                        ex.get("workspace_id", "personal"),
+                        ex.get("entities"),
+                    )
                     new_strength = self.forgetting.apply_interference(
-                        ex["strength"], sim,
+                        ex["strength"],
+                        sim,
+                        decay_policy=decay_policy,
+                        never_decay=bool(ex.get("never_decay", 0)),
+                        importance_score=float(ex.get("importance_score", 0.5)),
                     )
                     await self.staging.update_strength(ex["id"], new_strength)
 
@@ -416,6 +427,10 @@ class MemoryManager:
                 "recency_distance": 0.0,
                 "context_similarity": relevance,
                 "timestamp": "",
+                "workspace_id": mem.get("metadata", {}).get(
+                    "workspace_id",
+                    "personal",
+                ),
             })
 
         # 2. Episodic store — recent episodes scored with embedding similarity
@@ -451,6 +466,7 @@ class MemoryManager:
                 "recency_distance": recency_dist,
                 "context_similarity": ctx_sim,
                 "timestamp": ep.get("timestamp", ""),
+                "workspace_id": ep.get("workspace_id", "personal"),
             })
 
         # 3. Spreading activation — parallel search for activated nodes
@@ -474,6 +490,10 @@ class MemoryManager:
                             "recency_distance": 0.0,
                             "context_similarity": relevance,
                             "activation_boost": act_level,
+                            "workspace_id": mem.get("metadata", {}).get(
+                                "workspace_id",
+                                "personal",
+                            ),
                         })
                 except Exception:
                     pass
@@ -529,6 +549,12 @@ class MemoryManager:
         async def _apply_rif(c: dict) -> None:
             ep = await self.episodic.get_by_id(c["id"])
             if ep:
+                decay_policy = await self.consolidation._get_decay_policy(
+                    ep.get("workspace_id", "personal"),
+                    ep.get("entities"),
+                )
+                if bool(ep.get("never_decay", 0)) or decay_policy == "none":
+                    return
                 new_str = self.forgetting.retrieval_induced_forgetting(ep["strength"])
                 await self.episodic.update_strength(c["id"], new_str)
 
@@ -562,6 +588,7 @@ class MemoryManager:
                 query=query,
                 score=c.get("score", 0.0),
                 source=c.get("source", "memory"),
+                workspace_id=c.get("workspace_id", workspace_id or "personal"),
             )
         if top_results:
             self.recall_tracker.save()

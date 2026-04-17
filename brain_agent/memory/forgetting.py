@@ -22,11 +22,29 @@ class ForgettingEngine:
             return 0.0
         return math.exp(-distance / strength)
 
-    def apply_interference(self, old_strength: float, similarity: float) -> float:
-        """Reduce strength when a similar competing memory exceeds threshold."""
+    def apply_interference(
+        self,
+        old_strength: float,
+        similarity: float,
+        decay_policy: str = "normal",
+        never_decay: bool = False,
+        importance_score: float = 0.5,
+    ) -> float:
+        """Reduce strength when a similar competing memory exceeds threshold.
+
+        Phase 6 adds workspace protection and importance scaling. A fully
+        important memory loses half as much strength as a baseline memory.
+        """
+        if never_decay:
+            return old_strength
+        if decay_policy == "none":
+            return old_strength
         if similarity < INTERFERENCE_THRESHOLD:
             return old_strength
-        return max(0.0, old_strength * (1.0 - similarity * INTERFERENCE_FACTOR))
+        importance_factor = 1.0 - importance_score * 0.5
+        base_loss = similarity * INTERFERENCE_FACTOR
+        adjusted_loss = base_loss * importance_factor
+        return max(0.0, old_strength * (1.0 - adjusted_loss))
 
     def retrieval_induced_forgetting(self, competitor_strength: float) -> float:
         """Suppress competing memories when a related memory is retrieved."""

@@ -197,7 +197,7 @@ async def test_prune_weak_edges(store):
 
 
 async def test_decay_edge_weights(store):
-    await store.add_relationship("a", "r", "b", weight=1.0)
+    await store.add_relationship("a", "r", "b", weight=1.0, importance_score=0.0)
     affected = await store.decay_edge_weights(factor=0.9)
     assert affected >= 1
     rels = await store.get_relationships("a")
@@ -206,7 +206,9 @@ async def test_decay_edge_weights(store):
 
 async def test_prune_after_decay(store):
     """Decay + prune should remove edges that fall below threshold."""
-    await store.add_relationship("weak", "r", "node", weight=0.12)
+    await store.add_relationship(
+        "weak", "r", "node", weight=0.12, importance_score=0.0
+    )
     await store.decay_edge_weights(factor=0.8)  # 0.12 * 0.8 = 0.096
     pruned = await store.prune_weak_edges(min_weight=0.1)
     assert pruned == 1

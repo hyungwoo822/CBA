@@ -159,15 +159,12 @@ class EpisodicStore:
         await self._db.commit()
 
     async def delete_below_strength(self, threshold: float) -> int:
-        async with self._db.execute(
-            "SELECT COUNT(*) FROM episodes WHERE strength < ?", (threshold,)
-        ) as cursor:
-            count = (await cursor.fetchone())[0]
-        await self._db.execute(
-            "DELETE FROM episodes WHERE strength < ?", (threshold,)
+        cursor = await self._db.execute(
+            "DELETE FROM episodes WHERE strength < ? AND never_decay = 0",
+            (threshold,),
         )
         await self._db.commit()
-        return count
+        return cursor.rowcount or 0
 
     # ------------------------------------------------------------------
     # Read operations

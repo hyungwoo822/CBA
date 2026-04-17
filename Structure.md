@@ -35,6 +35,11 @@ Fast navigation index for this repo. Read this **before** exploring the codebase
 |---|---|
 | `test_personal_adapter.py` | Phase 4 adapter passthrough, node rendering, write-back, and round-trip tests |
 | `test_phase4_smoke.py` | Phase 4 regression smoke for legacy `identity_facts` callers |
+| `test_phase6_decay_policy.py` | Phase 6 consolidation policy resolution plus transfer/homeostatic decay tests |
+| `test_phase6_dream_engine.py` | Phase 6 dreaming origin workspace tracking and all-workspaces parity tests |
+| `test_phase6_edge_decay.py` | Phase 6 semantic edge decay/prune tests for workspace, importance, and never_decay |
+| `test_phase6_forgetting.py` | Phase 6 ForgettingEngine policy, never_decay, and importance-scaling tests |
+| `test_phase6_smoke.py` | Phase 6 mixed-workspace end-to-end decay smoke tests |
 | `test_retrieve_with_contradictions.py` | Phase 5 retrieval post-processing tests for contradictions and reconstruction gaps |
 | `test_workspace_awareness_backward_compat.py` | Phase 5 signature compatibility tests for workspace-aware exports and staging |
 

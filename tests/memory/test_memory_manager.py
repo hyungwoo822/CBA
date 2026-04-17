@@ -146,6 +146,25 @@ async def test_encode_no_interference_for_dissimilar(mm_similar):
     assert mem1["strength"] == 1.0
 
 
+async def test_encode_interference_respects_never_decay(mm_similar):
+    """Staged protected memories should not be weakened by similar encodes."""
+    mm = mm_similar
+    protected_id = await mm.staging.encode(
+        content="Python is used for AI",
+        entities={},
+        interaction_id=1,
+        session_id="s1",
+        never_decay=1,
+    )
+    await mm.encode(
+        content="Python is used for artificial intelligence",
+        entities={},
+        interaction_id=2,
+    )
+    protected = await mm.staging.get_by_id(protected_id)
+    assert protected["strength"] == pytest.approx(1.0)
+
+
 # ------------------------------------------------------------------
 # Task 1.2: Retrieval-Induced Forgetting
 # ------------------------------------------------------------------
@@ -549,5 +568,30 @@ async def test_memory_manager_personal_adapter_reads_semantic_writes(
         facts = await mm.personal.get_user_facts()
         assert len(facts) == 1
         assert facts[0]["value"] == "Alice"
+    finally:
+        await mm.close()
+
+
+async def test_memory_manager_wires_consolidation_workspace_store(
+    tmp_path,
+    mock_embedding,
+):
+    mm = MemoryManager(db_dir=str(tmp_path), embed_fn=mock_embedding)
+    await mm.initialize()
+    try:
+        assert mm.consolidation._workspace_store is mm.workspace
+        assert mm.consolidation._ontology_store is mm.ontology
+    finally:
+        await mm.close()
+
+
+async def test_memory_manager_wires_semantic_workspace_store(
+    tmp_path,
+    mock_embedding,
+):
+    mm = MemoryManager(db_dir=str(tmp_path), embed_fn=mock_embedding)
+    await mm.initialize()
+    try:
+        assert mm.semantic._workspace_store is mm.workspace
     finally:
         await mm.close()

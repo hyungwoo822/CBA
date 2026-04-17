@@ -58,6 +58,8 @@ class ConsolidationEngine:
         self._pfc_fn = pfc_fn
         self._similarity_fn = similarity_fn or self._default_cosine
         self._get_ach = get_acetylcholine
+        self._workspace_store = None
+        self._ontology_store = None
 
     @staticmethod
     def _default_cosine(a: list[float], b: list[float]) -> float:
@@ -69,6 +71,61 @@ class ConsolidationEngine:
         dot = float(np.dot(va, vb))
         norm = float(np.linalg.norm(va) * np.linalg.norm(vb))
         return dot / norm if norm > 0 else 0.0
+
+    # ------------------------------------------------------------------
+    # Phase 6: decay policy resolution
+    # ------------------------------------------------------------------
+
+    async def _get_workspace(self, workspace_id: str) -> dict:
+        """Return workspace metadata, falling back to normal decay."""
+        store = getattr(self, "_workspace_store", None)
+        if store is None:
+            return {"id": workspace_id, "decay_policy": "normal"}
+        row = await store.get_workspace(workspace_id)
+        if row is None:
+            return {"id": workspace_id, "decay_policy": "normal"}
+        return row
+
+    async def _resolve_entity_types(
+        self,
+        entities: dict | None,
+        workspace_id: str,
+    ) -> list[dict]:
+        """Resolve ontology node types for entity values with a type field."""
+        store = getattr(self, "_ontology_store", None)
+        if store is None or not isinstance(entities, dict):
+            return []
+        resolved: list[dict] = []
+        for value in entities.values():
+            if not isinstance(value, dict):
+                continue
+            type_name = value.get("type")
+            if not type_name:
+                continue
+            row = await store.resolve_node_type(workspace_id, type_name)
+            if row is not None:
+                resolved.append(row)
+        return resolved
+
+    async def _get_decay_policy(
+        self,
+        workspace_id: str,
+        entities: dict | None,
+    ) -> str:
+        """Resolve effective policy: type override beats workspace policy."""
+        ws = await self._get_workspace(workspace_id)
+        policy = ws.get("decay_policy", "normal")
+        rank = {"none": 0, "slow": 1, "normal": 2}
+        for entity_type in await self._resolve_entity_types(entities, workspace_id):
+            override = entity_type.get("decay_override")
+            if override and rank.get(override, 99) < rank.get(policy, 99):
+                policy = override
+        return policy
+
+    @staticmethod
+    def _adjust_decay_factor(base_factor: float, importance_score: float) -> float:
+        importance_factor = 1.0 - importance_score * 0.5
+        return 1.0 - (1.0 - base_factor) * importance_factor
 
     async def should_consolidate(self) -> bool:
         """Return True when staging pressure exceeds the threshold."""
@@ -111,7 +168,30 @@ class ConsolidationEngine:
         )
 
         for mem in memories:
-            strength = mem["strength"] * ach_transfer_factor
+            ws_id = mem.get("workspace_id", "personal")
+            never_decay = bool(mem.get("never_decay", 0))
+            importance = float(mem.get("importance_score", 0.5))
+
+            if never_decay:
+                strength = mem["strength"]
+            else:
+                decay_policy = await self._get_decay_policy(
+                    ws_id,
+                    mem.get("entities"),
+                )
+                if decay_policy == "none":
+                    strength = mem["strength"]
+                elif decay_policy == "slow":
+                    strength = mem["strength"] * self._adjust_decay_factor(
+                        0.99,
+                        importance,
+                    )
+                else:
+                    strength = mem["strength"] * self._adjust_decay_factor(
+                        ach_transfer_factor,
+                        importance,
+                    )
+
             arousal = mem["emotional_tag"].get("arousal", 0)
             if arousal > 0.5:
                 strength *= 1.0 + (arousal * EMOTIONAL_BOOST)
@@ -139,6 +219,9 @@ class ConsolidationEngine:
                 session_id=mem["last_session"],
                 strength=strength,
                 access_count=mem["access_count"],
+                workspace_id=ws_id,
+                importance_score=importance,
+                never_decay=never_decay,
             )
             await self._staging.mark_consolidated(mem["id"])
             result.transferred += 1
@@ -146,8 +229,26 @@ class ConsolidationEngine:
         # --- Phase 2: homeostatic scaling of existing episodes ---
         all_episodes = await self._episodic.get_all()
         for ep in all_episodes:
-            new_strength = ep["strength"] * HOMEOSTATIC_FACTOR
-            if new_strength < PRUNING_THRESHOLD:
+            if bool(ep.get("never_decay", 0)):
+                continue
+            ws_id = ep.get("workspace_id", "personal")
+            decay_policy = await self._get_decay_policy(
+                ws_id,
+                ep.get("entities"),
+            )
+            if decay_policy == "none":
+                continue
+            if decay_policy == "slow":
+                factor = 0.99
+                threshold = 0.01
+            else:
+                factor = HOMEOSTATIC_FACTOR
+                threshold = PRUNING_THRESHOLD
+
+            importance = float(ep.get("importance_score", 0.5))
+            adjusted_factor = self._adjust_decay_factor(factor, importance)
+            new_strength = ep["strength"] * adjusted_factor
+            if new_strength < threshold:
                 result.pruned += 1
             else:
                 await self._episodic.update_strength(ep["id"], new_strength)
