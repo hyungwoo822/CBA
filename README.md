@@ -21,7 +21,7 @@ CBA is an AI agent framework built on the foundations of over 50 neuroscience an
 
 The architectural direction was initially inspired by [OpenClaw](https://github.com/OpenClaw). We studied its modular design philosophy and adapted it into a neuroscience-grounded cognitive pipeline, optimizing each component to mirror how the human brain actually processes information — from sensory gating through emotional appraisal to speech production.
 
-**What CBA is evolving into.** The neuroscience-grounded architecture is the foundation, not the final product. CBA is being developed into a **lossless knowledge curator for coding agents** — a place where you drop multimodal business-logic information (text, images, PDFs, audio) and get back a structured, workspace-partitioned, contradiction-aware context that downstream coding agents (Claude Code, Cursor, etc.) can consume via MCP. The biological architecture gives us principled answers to hard questions: what to forget, when to ask clarifying questions, how to detect contradictions, how to separate similar events. See the [Knowledge Layer](#knowledge-layer-in-development) section below for the in-progress extension.
+**What CBA has evolved into.** The neuroscience-grounded architecture is the foundation, not the final product. CBA now includes a **lossless knowledge curator for coding agents** — a place where you drop multimodal business-logic information (text, images, PDFs, audio) and get back structured, workspace-partitioned, contradiction-aware context that downstream coding agents (Claude Code, Cursor, etc.) can consume via MCP. The biological architecture gives us principled answers to hard questions: what to forget, when to ask clarifying questions, how to detect contradictions, how to separate similar events. See the [Knowledge Layer](#knowledge-layer) section below for the completed Phase 0-8 implementation.
 
 This project is far from complete. There are rough edges, unexplored ideas, and plenty of room for improvement. We are releasing CBA as open source with the hope that it can grow through community collaboration — researchers, engineers, and curious minds contributing perspectives we haven't considered, catching mistakes we've overlooked, and pushing the framework in directions we haven't imagined. If even a small part of this work sparks a useful conversation or inspires a new approach, it will have been worthwhile.
 
@@ -283,11 +283,25 @@ Cell assemblies (hyperedges) enable group-level memory: when one member of an as
 
 ---
 
-## Knowledge Layer (In Development)
+## Knowledge Layer
 
 A workspace-aware curation layer sits on top of the 6-layer memory system. It turns CBA from a general conversational agent into a **business-logic curator** for coding agents: you feed in specs, decisions, PDFs, or ad-hoc chat, and the system stores them losslessly, partitions them by project, detects contradictions, asks when something's ambiguous, and exposes the curated context for downstream tools.
 
-**Status:** architectural design complete (see `docs/knowledge_layer_plan.md`, local-only). Implementation is landing phase by phase; foundation and storage pieces are in progress, with later integration work kept behind separate TDD plans.
+**Status:** Phase 0-8 are implemented and wired into the runtime, memory layer, extraction pipeline, dashboard backend, and React dashboard. The local-only plan set in `docs/superpowers/plans/2026-04-17-phase-*.md` remains the detailed TDD history; the public README now reflects the delivered behavior.
+
+### Implemented phase map
+
+| Phase | Delivered surface | Runtime result |
+|---|---|---|
+| **0 - Workspace & ontology foundation** | `WorkspaceStore`, `OntologyStore`, universal seed, migration runner | Every session has a current workspace, a personal workspace exists by default, and ontology types can be resolved per workspace plus `__universal__`. |
+| **1 - Raw Vault & schema enrichment** | SHA256 `RawVault`, workspace/provenance/importance/decay columns across memory stores | Original inputs are preserved or pointer-tracked, deduplicated by hash, and linked back from graph/staging/episode records. |
+| **2 - Contradictions & open questions** | `ContradictionsStore`, `OpenQuestionsStore`, severity rules, batch subject lookup | Ambiguity and conflicts are durable queues instead of transient log messages; severe items can block the response path. |
+| **3 - Multi-stage extractor** | Triage, Extract, Temporal Resolve, Validate, Severity, Refine, Orchestrator | The old single PSC call is replaced with workspace-aware, ontology-constrained extraction that writes only to staging and curation queues. |
+| **4 - Personal adapter** | `PersonalAdapter` over legacy `identity_facts` | Personal memory keeps backward compatibility while exposing user/agent facts as workspace-style `Person` nodes. |
+| **5 - Pipeline integration** | Orchestrator front-door wiring, `response_mode`, retrieval contradiction/gap metadata, Wernicke workspace hints, Broca block formatting | Normal answers, appended clarification questions, and block-mode clarification responses all flow through the neural pipeline without changing the 7-phase topology. |
+| **6 - Decay policy** | Workspace/type/edge decay policy, `importance_score`, `never_decay`, all-workspaces dreaming | Business-critical facts can be protected from forgetting while personal and low-importance memories still decay normally. |
+| **7 - Domain templates** | `software-project`, `research-notes`, `personal-knowledge`, apply/upgrade/downgrade APIs | New workspaces can adopt a ready ontology, minor upgrades can apply safely, major upgrades require confirmation, and downgrades are refused. |
+| **8 - Visualization & human-in-the-loop** | Workspace APIs, curation APIs, source/timeline/export/model APIs, dashboard selectors and inboxes | The dashboard can switch workspaces, inspect scoped graphs, resolve questions/contradictions/proposals, preview raw sources, export curated context, and select per-stage models. |
 
 ### What it adds
 
@@ -303,7 +317,7 @@ A workspace-aware curation layer sits on top of the 6-layer memory system. It tu
 | **Pattern separation for Events** | Similar events with nearby timestamps trigger a merge-or-distinct clarification instead of silent collapse | Yassa & Stark (2011) dentate gyrus |
 | **`never_decay` + `importance_score`** | Business logic / specs / decisions can be protected from normal forgetting; emphasis words and reinforcement modulate decay | LeDoux (1996) amygdala event-level modulation |
 | **Domain templates** | Drop-in ontologies: `software-project` (Requirement, Decision, Module, Interface, Constraint, Risk…), `research-notes`, `personal-knowledge` | Ashby & Maddox (2011) category learning |
-| **Coding agent export preview** | Filterable JSON export (by confidence tier, importance, `never_decay`) that matches the planned MCP response shape | — |
+| **Coding agent export preview** | Filterable JSON export (by confidence tier, importance, `never_decay`) that matches the MCP-compatible response shape | — |
 
 ### Data flow
 
@@ -324,13 +338,14 @@ User input (text/image/audio/PDF)
 
 Writes land in hippocampal staging only — semantic and episodic promotions happen through the existing ConsolidationEngine, preserving the CLS fast/slow distinction.
 
-### Dashboard additions (planned)
+### Dashboard additions
 
-- **Workspace selector** in the HUD, current-workspace badge, cross-ref toggle in the knowledge graph panel
-- **Curation Inbox**: three tabs for Open Questions, Contradictions, and pending Ontology Proposals — answer/resolve from chat or Inbox, WebSocket keeps both in sync
-- **Raw Vault drill-down** on any node/edge back to the original source snippet
-- **Export Preview modal** showing what a coding agent would receive from a given workspace, with filter controls
-- **Model Selector** reading available providers via litellm — triage/extract/temporal/refine are independently configurable; nothing is vendor-locked
+- **Workspace selector** in the HUD, current-workspace badge, workspace-scoped graph requests, and optional cross-reference edges.
+- **Curation Inbox** with Open Questions, Contradictions, and Ontology Proposals tabs. Actions taken in chat or Inbox emit WebSocket events so both surfaces stay in sync.
+- **Raw Vault drill-down** from source-linked nodes and edges back to metadata, extracted text, or raw bytes.
+- **Timeline view** for temporal supersede chains, so "old state -> new state" updates are inspectable instead of flattened.
+- **Export Preview modal** with confidence, importance, `never_decay`, and raw-vault filters before a coding agent consumes context.
+- **Model Selector** backed by LiteLLM provider inventory. Triage, extract, temporal classify, and refine stages are configurable independently with opaque model identifiers.
 
 ---
 
@@ -351,18 +366,22 @@ Six neurochemical systems with different decay rates and anatomically correct so
 
 ## Dashboard
 
-Real-time 3D brain visualization: React 19 + Three.js + WebSocket.
+Real-time 3D brain visualization and knowledge-layer curation: React 19 + Three.js + Zustand + WebSocket.
 
 ```bash
 brain-agent dashboard --port 3000
 ```
 
-- 21 brain regions with activation glow and sequential cascade
+- 23 brain regions with activation glow and sequential cascade
 - Signal particles flowing between regions
 - 25+ anatomical neural connections
-- HUD with network mode and 6 neurotransmitter bars
+- HUD with network mode, 6 neurotransmitter bars, current workspace, inbox count, export controls, and model controls
 - Memory flow pipeline with live counts
-- Knowledge graph visualization with community coloring, hub highlighting, and confidence-based edges
+- Knowledge graph visualization with workspace filters, optional cross-reference edges, community coloring, hub highlighting, confidence overlays, and Raw Vault source preview
+- Curation Inbox for answering open questions, resolving contradictions, and approving or rejecting ontology proposals
+- Timeline view for superseded temporal facts
+- Export Preview for MCP-compatible coding-agent context
+- Per-stage model selector sourced from `/api/llm/providers`
 - Audio input with voice mode
 - Multimodal input (image, audio, text)
 
@@ -372,52 +391,53 @@ brain-agent dashboard --port 3000
 
 ```
 CBA/
-├── brain_agent/
-│   ├── agent.py              # Main entry point
-│   ├── pipeline.py           # 7-phase neural pipeline
-│   ├── config/               # Pydantic configuration
-│   ├── core/                 # Signals, neuromodulators, router
-│   ├── regions/              # 23 brain regions
-│   ├── memory/               # 6-layer memory system + graph analysis
-│   │                         # + workspace_store / ontology_store (Knowledge Layer)
-│   ├── extraction/           # Multi-stage extractor (planned, Phase 3)
-│   ├── migrations/           # Schema migration runner
-│   ├── providers/            # LLM provider (LiteLLM — vendor-agnostic)
-│   ├── dashboard/            # FastAPI WebSocket server
-│   ├── tools/                # Tool registry
-│   ├── mcp/                  # MCP integration
-│   └── middleware/            # Middleware chains
-├── dashboard/                # React + Three.js frontend
-├── tests/                    # 621+ tests
-├── .env.example              # Environment template
-└── LICENSE                   # MIT
+|-- brain_agent/
+|   |-- agent.py              # Main entry point
+|   |-- pipeline.py           # 7-phase neural pipeline with extraction-orchestrator integration
+|   |-- config/               # Pydantic configuration, including extraction/workspace settings
+|   |-- core/                 # Signals, neuromodulators, router, workspace primitives
+|   |-- regions/              # 23 brain regions
+|   |-- memory/               # CLS stores plus workspace, ontology, raw vault, curation, templates, decay
+|   |-- extraction/           # Multi-stage extractor: triage, extract, temporal, validate, severity, refine
+|   |-- migrations/           # Schema migration runner and knowledge-layer migrations
+|   |-- providers/            # LLMProvider abstraction and LiteLLM implementation
+|   |-- dashboard/            # FastAPI app, event emitter, provider inventory, routers
+|   |-- tools/                # Tool registry
+|   |-- mcp/                  # MCP integration
+|   `-- middleware/           # Middleware chains
+|-- dashboard/                # React + Three.js + Zustand dashboard
+|-- tests/                    # Python, dashboard API, extraction, memory, and frontend tests
+|-- assets/                   # README images
+|-- .env.example              # Environment template
+`-- LICENSE                   # MIT
 ```
 
 ---
 
-## Roadmap
+## Completed Rollout
 
-The knowledge layer is staged across 8 phases. Each phase is planned as a standalone TDD implementation plan (local, in `docs/superpowers/plans/`) producing working, testable software on its own.
+The 2026-04-17 knowledge-layer rollout is complete across Phase 0-8. The local-only TDD plans remain under `docs/superpowers/plans/`; this table summarizes the public state.
 
-| Phase | Scope | Dependency |
+| Phase | Scope | Status |
 |---|---|---|
-| **0** — Foundation | `WorkspaceStore`, `OntologyStore`, universal seed (7 node + 10 relation types), schema-version migration runner | — |
-| **1** — Raw Vault & Schema Enrichment | SHA256 raw vault, workspace_id / epistemic_source / importance_score / never_decay columns across existing stores, ChromaDB metadata filter | 0 |
-| **2** — Contradictions & Open Questions | Severity-tiered stores, batched retrieval-time monitoring | 0 |
-| **3** — Multi-stage Extractor | Triage → Extract → Temporal Resolve → Validate → Severity → Refine orchestrator | 0, 1, 2 |
-| **4** — Personal Adapter | Backward-compatible bridge from legacy `identity_facts` to workspace-node form | 0 |
-| **5** — Pipeline Integration | Replace PSC with orchestrator, add `response_mode='block'`, retrieval post-processing (S1+S2), Expression-mode wiring | 0–4 |
-| **6** — Decay Policy | Workspace-level + type-level + edge-level (`importance_score`, `never_decay`) differentiated forgetting, all-workspaces dream preservation | 0, 1 |
-| **7** — Domain Templates | `software-project`, `research-notes`, `personal-knowledge` ontology templates with upgrade/downgrade semantics | 0 |
-| **8** — Visualization & Human-in-the-Loop | Workspace selector, Curation Inbox, Raw Vault drill-down, Timeline, Export Preview, Model Selector (per-call-site independent) | 0–6 |
+| **0 - Foundation** | `WorkspaceStore`, `OntologyStore`, universal seed, migration runner | Complete |
+| **1 - Raw Vault & Schema Enrichment** | SHA256 raw vault, workspace/provenance/importance/decay columns, ChromaDB workspace metadata | Complete |
+| **2 - Contradictions & Open Questions** | Severity-tiered durable curation stores and batch lookup | Complete |
+| **3 - Multi-stage Extractor** | Triage -> Extract -> Temporal Resolve -> Validate -> Severity -> Refine orchestrator | Complete |
+| **4 - Personal Adapter** | Backward-compatible `identity_facts` bridge to workspace nodes | Complete |
+| **5 - Pipeline Integration** | Orchestrator replaces PSC, response modes, retrieval S1/S2, expression-mode wiring | Complete |
+| **6 - Decay Policy** | Workspace/type/edge decay, `importance_score`, `never_decay`, all-workspaces dreaming | Complete |
+| **7 - Domain Templates** | Software project, research notes, personal knowledge templates with upgrade semantics | Complete |
+| **8 - Visualization & Human-in-the-Loop** | Dashboard workspace, curation, source, timeline, export, and model-selection surfaces | Complete |
 
 ---
 
 ## Tests
 
 ```bash
-pytest                  # 621+ tests
-pytest --cov            # With coverage
+pytest                  # Python suite
+pytest --cov            # Python coverage
+cd dashboard && npm test # React/Vitest dashboard suite
 ```
 
 ---
@@ -426,7 +446,7 @@ pytest --cov            # With coverage
 
 | Branch | Description |
 |--------|-------------|
-| `main` | Stable release. Knowledge Layer work in progress. |
+| `main` | Stable release with Knowledge Layer Phase 0-8 implemented. |
 | `graphify` | Knowledge graph analysis: Leiden clustering, cell assemblies, MCP metacognition, dashboard viz |
 | `openclaw` | Extended features: MCP, tool system, middleware |
 
