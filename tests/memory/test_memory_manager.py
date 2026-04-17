@@ -1,6 +1,11 @@
 import numpy as np
 import pytest
 from brain_agent.memory.manager import MemoryManager
+from brain_agent.memory.contradictions_store import ContradictionsStore
+from brain_agent.memory.open_questions_store import OpenQuestionsStore
+from brain_agent.memory.workspace_store import WorkspaceStore, PERSONAL_WORKSPACE_ID
+from brain_agent.memory.ontology_store import OntologyStore
+from brain_agent.memory.ontology_seed import UNIVERSAL_WORKSPACE_ID
 
 
 @pytest.fixture
@@ -411,3 +416,109 @@ async def test_update_knowledge_graph_with_category(mm):
     await mm.update_knowledge_graph([], relations)
     rels = await mm.semantic.get_relationships("python")
     assert rels[0]["category"] == "ACTION"
+
+
+async def test_memory_manager_registers_workspace_store(tmp_path, mock_embedding):
+    mm = MemoryManager(db_dir=str(tmp_path), embed_fn=mock_embedding)
+    await mm.initialize()
+    try:
+        assert isinstance(mm.workspace, WorkspaceStore)
+        personal = await mm.workspace.get_workspace(PERSONAL_WORKSPACE_ID)
+        assert personal is not None
+    finally:
+        await mm.close()
+
+
+async def test_memory_manager_registers_ontology_store_with_universal_seed(
+    tmp_path, mock_embedding
+):
+    mm = MemoryManager(db_dir=str(tmp_path), embed_fn=mock_embedding)
+    await mm.initialize()
+    try:
+        assert isinstance(mm.ontology, OntologyStore)
+        universal_nodes = await mm.ontology.get_node_types(UNIVERSAL_WORKSPACE_ID)
+        assert len(universal_nodes) == 7
+        universal_relations = await mm.ontology.get_relation_types(
+            UNIVERSAL_WORKSPACE_ID
+        )
+        assert len(universal_relations) == 10
+    finally:
+        await mm.close()
+
+
+async def test_memory_manager_initialize_idempotent(tmp_path, mock_embedding):
+    mm = MemoryManager(db_dir=str(tmp_path), embed_fn=mock_embedding)
+    await mm.initialize()
+    try:
+        nodes_first = await mm.ontology.get_node_types(UNIVERSAL_WORKSPACE_ID)
+    finally:
+        await mm.close()
+
+    mm2 = MemoryManager(db_dir=str(tmp_path), embed_fn=mock_embedding)
+    await mm2.initialize()
+    try:
+        nodes_second = await mm2.ontology.get_node_types(UNIVERSAL_WORKSPACE_ID)
+    finally:
+        await mm2.close()
+
+    assert len(nodes_first) == len(nodes_second) == 7
+
+
+async def test_memory_manager_registers_contradictions_store(memory_manager):
+    assert isinstance(memory_manager.contradictions, ContradictionsStore)
+    row = await memory_manager.contradictions.detect(
+        workspace_id="personal",
+        subject="Alice",
+        key_or_relation="prefers_coffee",
+        value_a="yes",
+        value_b="no",
+        value_a_confidence="EXTRACTED",
+        value_b_confidence="EXTRACTED",
+    )
+    assert row["severity"] == "severe"
+    openings = await memory_manager.contradictions.list_open("personal")
+    assert len(openings) == 1
+
+
+async def test_memory_manager_registers_open_questions_store(memory_manager):
+    assert isinstance(memory_manager.open_questions, OpenQuestionsStore)
+    q = await memory_manager.open_questions.add_question(
+        workspace_id="personal",
+        question="Which region?",
+        raised_by="unknown_fact",
+        severity="severe",
+    )
+    assert q["blocking"] == 1
+    blocking = await memory_manager.open_questions.list_blocking("personal")
+    assert len(blocking) == 1
+
+
+async def test_memory_manager_phase2_stores_survive_reopen(tmp_path, mock_embedding):
+    mm = MemoryManager(db_dir=str(tmp_path), embed_fn=mock_embedding)
+    await mm.initialize()
+    try:
+        await mm.contradictions.detect(
+            workspace_id="personal",
+            subject="Alice",
+            key_or_relation="k",
+            value_a="x",
+            value_b="y",
+            value_a_confidence="EXTRACTED",
+            value_b_confidence="EXTRACTED",
+        )
+        await mm.open_questions.add_question(
+            workspace_id="personal",
+            question="Q",
+            raised_by="user",
+            severity="severe",
+        )
+    finally:
+        await mm.close()
+
+    mm2 = MemoryManager(db_dir=str(tmp_path), embed_fn=mock_embedding)
+    await mm2.initialize()
+    try:
+        assert len(await mm2.contradictions.list_open("personal")) == 1
+        assert await mm2.open_questions.count_blocking("personal") == 1
+    finally:
+        await mm2.close()

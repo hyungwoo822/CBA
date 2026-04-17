@@ -21,6 +21,8 @@ CBA is an AI agent framework built on the foundations of over 50 neuroscience an
 
 The architectural direction was initially inspired by [OpenClaw](https://github.com/OpenClaw). We studied its modular design philosophy and adapted it into a neuroscience-grounded cognitive pipeline, optimizing each component to mirror how the human brain actually processes information — from sensory gating through emotional appraisal to speech production.
 
+**What CBA is evolving into.** The neuroscience-grounded architecture is the foundation, not the final product. CBA is being developed into a **lossless knowledge curator for coding agents** — a place where you drop multimodal business-logic information (text, images, PDFs, audio) and get back a structured, workspace-partitioned, contradiction-aware context that downstream coding agents (Claude Code, Cursor, etc.) can consume via MCP. The biological architecture gives us principled answers to hard questions: what to forget, when to ask clarifying questions, how to detect contradictions, how to separate similar events. See the [Knowledge Layer](#knowledge-layer-in-development) section below for the in-progress extension.
+
 This project is far from complete. There are rough edges, unexplored ideas, and plenty of room for improvement. We are releasing CBA as open source with the hope that it can grow through community collaboration — researchers, engineers, and curious minds contributing perspectives we haven't considered, catching mistakes we've overlooked, and pushing the framework in directions we haven't imagined. If even a small part of this work sparks a useful conversation or inspires a new approach, it will have been worthwhile.
 
 Contributions, feedback, and discussion are always welcome.
@@ -281,6 +283,57 @@ Cell assemblies (hyperedges) enable group-level memory: when one member of an as
 
 ---
 
+## Knowledge Layer (In Development)
+
+A workspace-aware curation layer sits on top of the 6-layer memory system. It turns CBA from a general conversational agent into a **business-logic curator** for coding agents: you feed in specs, decisions, PDFs, or ad-hoc chat, and the system stores them losslessly, partitions them by project, detects contradictions, asks when something's ambiguous, and exposes the curated context for downstream tools.
+
+**Status:** architectural design complete (see `docs/knowledge_layer_plan.md`, local-only), Phase 0 foundation landing. Phases 1–8 scoped as separate TDD plans.
+
+### What it adds
+
+| Feature | Purpose | Neuroscience anchor |
+|---|---|---|
+| **Multi-workspace knowledge graph** | Separate `personal`, `billing-service`, `research-notes` etc. with optional cross-references | Bartlett (1932) schema theory; van Kesteren et al. (2012) schema-dependent encoding |
+| **Raw Vault** | SHA256-addressed lossless storage of every input (text, image, PDF, audio). Small files copied, large files pointer-tracked | Johnson, Hashtroudi & Lindsay (1993) source monitoring |
+| **4-tier confidence ontology** | `PROVISIONAL → STABLE → CANONICAL → USER_GROUND_TRUTH` per node/relation type, auto-promoted on re-occurrence | Kadavath et al. (2022) LLM self-confidence miscalibration |
+| **Multi-stage extraction** | Replaces the single-call PSC with 6 stages: Triage → Extract (ontology-constrained) → **Temporal Resolve** → Validate → Severity Branch → Broca Refine | McClelland et al. (1995) Complementary Learning Systems |
+| **Temporal Resolve (Stage 2.5)** | Distinguishes state changes ("지금은 Go로 바꿨어") from genuine contradictions — prevents false-positive clarification blocks | Conway (2005) time-indexed self-memory |
+| **Severity-tiered clarification** | Ambiguity/contradictions become first-class pipeline outputs: `block` (severe → respond with question), `append` (moderate → answer + question), `normal` | Botvinick et al. (2001) ACC conflict monitoring |
+| **Contradictions + Open Questions stores** | Persistent human-in-the-loop queues. Contradictions carry both sides' source snippets; open questions track unanswered clarifications | Hart (1965) feeling-of-knowing |
+| **Pattern separation for Events** | Similar events with nearby timestamps trigger a merge-or-distinct clarification instead of silent collapse | Yassa & Stark (2011) dentate gyrus |
+| **`never_decay` + `importance_score`** | Business logic / specs / decisions can be protected from normal forgetting; emphasis words and reinforcement modulate decay | LeDoux (1996) amygdala event-level modulation |
+| **Domain templates** | Drop-in ontologies: `software-project` (Requirement, Decision, Module, Interface, Constraint, Risk…), `research-notes`, `personal-knowledge` | Ashby & Maddox (2011) category learning |
+| **Coding agent export preview** | Filterable JSON export (by confidence tier, importance, `never_decay`) that matches the planned MCP response shape | — |
+
+### Data flow
+
+```
+User input (text/image/audio/PDF)
+  │
+  ├─ Raw Vault (SHA256 dedup + integrity)
+  │
+  ├─ Stage 1  Triage          → workspace routing, multi-label input kind
+  ├─ Stage 2  Extract          → ontology-constrained structured output
+  ├─ Stage 2.5  Temporal Resolve → supersede / reinforce / contradict branch
+  ├─ Stage 3  Validate         → contradiction + missing-premise detection
+  ├─ Stage 4  Severity Branch  → normal / append / block
+  └─ Stage 5  Broca Refine     → personal workspace only
+      │
+      └─ Persist (staging-only) → ConsolidationEngine promotes to semantic/episodic
+```
+
+Writes land in hippocampal staging only — semantic and episodic promotions happen through the existing ConsolidationEngine, preserving the CLS fast/slow distinction.
+
+### Dashboard additions (planned)
+
+- **Workspace selector** in the HUD, current-workspace badge, cross-ref toggle in the knowledge graph panel
+- **Curation Inbox**: three tabs for Open Questions, Contradictions, and pending Ontology Proposals — answer/resolve from chat or Inbox, WebSocket keeps both in sync
+- **Raw Vault drill-down** on any node/edge back to the original source snippet
+- **Export Preview modal** showing what a coding agent would receive from a given workspace, with filter controls
+- **Model Selector** reading available providers via litellm — triage/extract/temporal/refine are independently configurable; nothing is vendor-locked
+
+---
+
 ## Neuromodulator System
 
 Six neurochemical systems with different decay rates and anatomically correct source nuclei.
@@ -326,7 +379,10 @@ CBA/
 │   ├── core/                 # Signals, neuromodulators, router
 │   ├── regions/              # 23 brain regions
 │   ├── memory/               # 6-layer memory system + graph analysis
-│   ├── providers/            # LLM provider (LiteLLM)
+│   │                         # + workspace_store / ontology_store (Knowledge Layer)
+│   ├── extraction/           # Multi-stage extractor (planned, Phase 3)
+│   ├── migrations/           # Schema migration runner
+│   ├── providers/            # LLM provider (LiteLLM — vendor-agnostic)
 │   ├── dashboard/            # FastAPI WebSocket server
 │   ├── tools/                # Tool registry
 │   ├── mcp/                  # MCP integration
@@ -336,6 +392,24 @@ CBA/
 ├── .env.example              # Environment template
 └── LICENSE                   # MIT
 ```
+
+---
+
+## Roadmap
+
+The knowledge layer is staged across 8 phases. Each phase is planned as a standalone TDD implementation plan (local, in `docs/superpowers/plans/`) producing working, testable software on its own.
+
+| Phase | Scope | Dependency |
+|---|---|---|
+| **0** — Foundation | `WorkspaceStore`, `OntologyStore`, universal seed (7 node + 10 relation types), schema-version migration runner | — |
+| **1** — Raw Vault & Schema Enrichment | SHA256 raw vault, workspace_id / epistemic_source / importance_score / never_decay columns across existing stores, ChromaDB metadata filter | 0 |
+| **2** — Contradictions & Open Questions | Severity-tiered stores, batched retrieval-time monitoring | 0 |
+| **3** — Multi-stage Extractor | Triage → Extract → Temporal Resolve → Validate → Severity → Refine orchestrator | 0, 1, 2 |
+| **4** — Personal Adapter | Backward-compatible bridge from legacy `identity_facts` to workspace-node form | 0 |
+| **5** — Pipeline Integration | Replace PSC with orchestrator, add `response_mode='block'`, retrieval post-processing (S1+S2), Expression-mode wiring | 0–4 |
+| **6** — Decay Policy | Workspace-level + type-level + edge-level (`importance_score`, `never_decay`) differentiated forgetting, all-workspaces dream preservation | 0, 1 |
+| **7** — Domain Templates | `software-project`, `research-notes`, `personal-knowledge` ontology templates with upgrade/downgrade semantics | 0 |
+| **8** — Visualization & Human-in-the-Loop | Workspace selector, Curation Inbox, Raw Vault drill-down, Timeline, Export Preview, Model Selector (per-call-site independent) | 0–6 |
 
 ---
 
@@ -352,7 +426,7 @@ pytest --cov            # With coverage
 
 | Branch | Description |
 |--------|-------------|
-| `main` | Stable release |
+| `main` | Stable release. Knowledge Layer foundation (Phase 0) in progress. |
 | `graphify` | Knowledge graph analysis: Leiden clustering, cell assemblies, MCP metacognition, dashboard viz |
 | `openclaw` | Extended features: MCP, tool system, middleware |
 
@@ -477,6 +551,24 @@ This framework is grounded in **50+ published neuroscience papers** spanning 192
 | Hebb (1949) | Cell Assembly theory | Hyperedges / Co-activation |
 | Flavell (1979) | Metacognition | MCP Knowledge Server |
 | Collins & Loftus (1975) | Spreading activation | Community-aware retrieval |
+
+### Knowledge Layer Foundations
+
+| Citation | Topic | System |
+|----------|-------|--------|
+| Bartlett (1932) | Schema theory: recall as reconstruction | Workspace as schema frame |
+| Hart (1965) | Feeling-of-knowing phenomenon | Open Questions store |
+| Brown & McNeill (1966) | Tip-of-the-tongue | Expression-mode gap detection |
+| Johnson, Hashtroudi & Lindsay (1993) | Source monitoring framework | Raw Vault, epistemic source tagging |
+| Moscovitch & Nadel (1997) | Multiple Trace Theory | Append-only versioning, `supersedes` |
+| Squire (1992) | Multiple memory systems | Staging-only write discipline |
+| Eichenbaum (2000) | Source binding | Knowledge graph provenance |
+| Conway (2005) | Memory and the Self — time-indexed facts | Stage 2.5 Temporal Resolve |
+| Tse et al. (2007) | Schema-dependent consolidation | Workspace-aware encoding |
+| Ashby & Maddox (2011) | Category learning | Ontology type hierarchy |
+| van Kesteren et al. (2012) | Schema-dependent encoding | Multi-workspace routing |
+| Ghosh & Gilboa (2014) | Schemas always active | Session workspace persistence |
+| Kadavath et al. (2022) | LLM self-confidence miscalibration | 4-tier confidence (PROVISIONAL → STABLE → CANONICAL → USER_GROUND_TRUTH) |
 
 ---
 

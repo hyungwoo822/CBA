@@ -569,9 +569,23 @@ class MemoryManager:
             Source of the facts: ``"user_input"``, ``"agent_response"``, or
             ``"unknown"`` (default).
         """
-        # Bare entity words (e.g., "user", "telegram") are NOT stored in
-        # ChromaDB — they add noise and are already represented as nodes
-        # in the knowledge_graph table.
+        # Store entity mentions as lightweight vector documents so semantic
+        # search can surface named concepts even before richer facts arrive.
+        for entity in entities:
+            text = entity.strip() if isinstance(entity, str) else ""
+            if not text or len(text) < 2:
+                continue
+            try:
+                existing = await self.semantic.search(text, top_k=1)
+                if existing and existing[0].get("distance", 1.0) < 0.05:
+                    continue
+            except Exception:
+                pass
+            await self.semantic.add(
+                text,
+                category="entity",
+                strength=0.6,
+            )
 
         # Store relations in knowledge graph
         # Relations may be [s, r, t], [s, r, t, confidence], or [s, r, t, confidence, category]
