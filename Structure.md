@@ -41,7 +41,26 @@ Fast navigation index for this repo. Read this **before** exploring the codebase
 | `test_phase6_forgetting.py` | Phase 6 ForgettingEngine policy, never_decay, and importance-scaling tests |
 | `test_phase6_smoke.py` | Phase 6 mixed-workspace end-to-end decay smoke tests |
 | `test_retrieve_with_contradictions.py` | Phase 5 retrieval post-processing tests for contradictions and reconstruction gaps |
+| `test_apply_template.py` | Phase 7 template application, composition, canonical confidence, and workspace isolation tests |
+| `test_templates_smoke.py` | Phase 7 end-to-end smoke for all bundled templates and universal overlay |
+| `test_upgrade_template.py` | Phase 7 template diff, dry-run, upgrade, soft-delete, and downgrade refusal tests |
 | `test_workspace_awareness_backward_compat.py` | Phase 5 signature compatibility tests for workspace-aware exports and staging |
+
+## `tests/memory/templates/` — Phase 7 Template Tests
+
+| File | Purpose |
+|---|---|
+| `__init__.py` | Package marker for template tests |
+| `test_template_contents.py` | Pure-data assertions for bundled template dicts and loader metadata |
+| `fixtures/__init__.py` | Package marker for upgrade fixture templates |
+| `fixtures/software_project_v1_1.py` | Fixture software-project v1.1 minor bump for upgrade tests |
+| `fixtures/software_project_v2_0.py` | Fixture software-project v2.0 major bump for upgrade tests |
+
+## `tests/migrations/` — Migration Test Additions
+
+| File | Purpose |
+|---|---|
+| `test_m002_template_upgrade_columns.py` | Phase 7 migration tests for ontology `deprecated` soft-delete columns |
 
 ## `tests/pipeline/` — Phase 5 Pipeline Integration Tests
 
@@ -132,11 +151,14 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 | `contradictions_store.py` | Workspace-scoped contradiction queue and subject batch lookup |
 | `open_questions_store.py` | Workspace-scoped clarifying question queue |
 
-**Planned (see `docs/knowledge_layer_plan.md`):**
+**Templates:**
 
-| Planned file | Phase | Purpose |
-|---|---|---|
-| `templates/software_project.py` etc. | 7 | Domain ontology templates |
+| File | Purpose |
+|---|---|
+| `templates/__init__.py` | Bundled domain template loader (`get_template`, `list_templates`) |
+| `templates/software_project.py` | Software-project ontology template (10 node + 10 relation types) |
+| `templates/research_notes.py` | Research-notes ontology template (6 node + 6 relation types) |
+| `templates/personal_knowledge.py` | Personal-knowledge ontology template (5 node + 5 relation types) |
 
 ## `brain_agent/extraction/` — Multi-stage Extractor
 
@@ -161,7 +183,8 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 | `__init__.py` | Exports `MigrationRunner` |
 | `runner.py` | Discovers + applies migration modules in order, records in `schema_version` |
 | `steps/m000_init_schema_version.py` | Bootstrap — creates `schema_version` table in `brain_state.db` |
-| `steps/m001_workspace_columns.py` (planned) | Phase 1 ALTER TABLEs |
+| `steps/m001_workspace_columns.py` | Phase 1 ALTER TABLEs for workspace/provenance columns |
+| `steps/m002_template_upgrade_columns.py` | Phase 7 ALTER TABLEs adding ontology type `deprecated` flags |
 
 ## `brain_agent/core/` — Shared Primitives
 

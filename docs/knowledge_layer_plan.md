@@ -1843,6 +1843,8 @@ def apply_interference(self, strength, similarity, decay_policy="normal",
 
 ### Phase 7 — Domain Templates
 
+**Status:** Phase 7 complete — templates + upgrade API landed
+
 **목표:** 사전 정의 ontology template + loader
 **산출물:** `brain_agent/memory/templates/` 디렉터리
 

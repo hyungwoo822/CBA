@@ -57,6 +57,7 @@ class OntologyStore:
                 source_id TEXT DEFAULT 'seed',
                 created_at TEXT NOT NULL,
                 promoted_at TEXT,
+                deprecated INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(workspace_id, name)
             )
             """
@@ -82,6 +83,7 @@ class OntologyStore:
                 source_id TEXT DEFAULT 'seed',
                 created_at TEXT NOT NULL,
                 promoted_at TEXT,
+                deprecated INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(workspace_id, name)
             )
             """
@@ -635,6 +637,463 @@ class OntologyStore:
         if missing:
             return False, [f"missing required property: {prop}" for prop in missing]
         return True, []
+
+    # ------------------------------------------------------------------
+    # Template application
+    # ------------------------------------------------------------------
+
+    async def apply_template(
+        self,
+        workspace_id: str,
+        template_name: str,
+        workspace_store=None,
+    ) -> dict:
+        """Apply a bundled domain ontology template to a workspace."""
+        from brain_agent.memory.templates import get_template
+
+        template = get_template(template_name)
+        await self._ensure_universal_seed()
+
+        applied_nodes = await self._apply_template_node_types(
+            workspace_id, template.get("node_types", [])
+        )
+        applied_relations = await self._apply_template_relation_types(
+            workspace_id, template.get("relation_types", [])
+        )
+
+        if workspace_store is not None:
+            await workspace_store.update_workspace(
+                workspace_id,
+                template_id=template["name"],
+                template_version=template["version"],
+            )
+
+        return {
+            "applied_node_types": applied_nodes,
+            "applied_relation_types": applied_relations,
+        }
+
+    async def _ensure_universal_seed(self) -> None:
+        universal = await self.get_node_types(UNIVERSAL_WORKSPACE_ID)
+        seeded_names = {node_type["name"] for node_type in universal}
+        required_names = {node_type["name"] for node_type in UNIVERSAL_NODE_TYPES}
+        if not required_names <= seeded_names:
+            await self.seed_universal()
+
+    async def _apply_template_node_types(
+        self, workspace_id: str, node_types: list[dict]
+    ) -> list[str]:
+        """Create or merge template node types, then resolve parent links."""
+        assert self._db is not None
+        applied: list[str] = []
+
+        for node_type in node_types:
+            name = node_type["name"]
+            schema = node_type.get("schema", {}) or {}
+            existing = await self._get_node_type_by_name(workspace_id, name)
+            if existing is None:
+                await self.register_node_type(
+                    workspace_id,
+                    name,
+                    parent_name=None,
+                    schema=schema,
+                    decay_override=node_type.get("decay_override"),
+                    source_id="template",
+                    source_snippet=f"template:{name}",
+                )
+            else:
+                merged = self._merge_schema(existing.get("schema", {}) or {}, schema)
+                await self._db.execute(
+                    """
+                    UPDATE node_types
+                    SET schema = ?, decay_override = COALESCE(?, decay_override),
+                        source_id = 'template', source_snippet = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        json.dumps(merged),
+                        node_type.get("decay_override"),
+                        f"template:{name}",
+                        existing["id"],
+                    ),
+                )
+                await self._db.commit()
+
+            row = await self._get_node_type_by_name(workspace_id, name)
+            assert row is not None
+            if row["confidence"] != "CANONICAL":
+                await self._db.execute(
+                    """
+                    UPDATE node_types
+                    SET confidence = 'CANONICAL', promoted_at = ?
+                    WHERE id = ?
+                    """,
+                    (_now(), row["id"]),
+                )
+                await self._db.commit()
+            applied.append(name)
+
+        for node_type in node_types:
+            parent_name = node_type.get("parent")
+            if parent_name is None:
+                continue
+            parent = await self.resolve_node_type(workspace_id, parent_name)
+            if parent is None:
+                raise ValueError(
+                    f"Parent type not found for {node_type['name']}: {parent_name}"
+                )
+            row = await self._get_node_type_by_name(workspace_id, node_type["name"])
+            assert row is not None
+            await self._db.execute(
+                "UPDATE node_types SET parent_type_id = ? WHERE id = ?",
+                (parent["id"], row["id"]),
+            )
+        await self._db.commit()
+        return applied
+
+    async def _apply_template_relation_types(
+        self, workspace_id: str, relation_types: list[dict]
+    ) -> list[str]:
+        """Create or merge template relation types, then resolve inverses."""
+        assert self._db is not None
+        applied: list[str] = []
+
+        for relation_type in relation_types:
+            name = relation_type["name"]
+            domain_id = await self._resolve_optional_node_type_id(
+                workspace_id, relation_type.get("domain"), f"Relation {name} domain"
+            )
+            range_id = await self._resolve_optional_node_type_id(
+                workspace_id, relation_type.get("range"), f"Relation {name} range"
+            )
+            existing = await self._get_relation_type_by_name(workspace_id, name)
+
+            if existing is None:
+                await self.register_relation_type(
+                    workspace_id,
+                    name,
+                    domain_type=relation_type.get("domain"),
+                    range_type=relation_type.get("range"),
+                    transitive=bool(relation_type.get("transitive", False)),
+                    symmetric=bool(relation_type.get("symmetric", False)),
+                    source_id="template",
+                    source_snippet=f"template:{name}",
+                )
+            else:
+                await self._db.execute(
+                    """
+                    UPDATE relation_types
+                    SET domain_type_id = ?, range_type_id = ?,
+                        transitive = transitive | ?, symmetric = symmetric | ?,
+                        inverse_of = NULL,
+                        source_id = 'template', source_snippet = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        domain_id,
+                        range_id,
+                        int(bool(relation_type.get("transitive", False))),
+                        int(bool(relation_type.get("symmetric", False))),
+                        f"template:{name}",
+                        existing["id"],
+                    ),
+                )
+                await self._db.commit()
+
+            row = await self._get_relation_type_by_name(workspace_id, name)
+            assert row is not None
+            if row["confidence"] != "CANONICAL":
+                await self._db.execute(
+                    """
+                    UPDATE relation_types
+                    SET confidence = 'CANONICAL', promoted_at = ?
+                    WHERE id = ?
+                    """,
+                    (_now(), row["id"]),
+                )
+                await self._db.commit()
+            applied.append(name)
+
+        name_to_id = {
+            relation["name"]: relation["id"]
+            for relation in await self.get_relation_types(workspace_id)
+        }
+        for relation_type in relation_types:
+            inverse_name = relation_type.get("inverse_of")
+            if inverse_name is None:
+                continue
+            relation_id = name_to_id.get(relation_type["name"])
+            inverse_id = name_to_id.get(inverse_name)
+            if relation_id and inverse_id:
+                await self._db.execute(
+                    "UPDATE relation_types SET inverse_of = ? WHERE id = ?",
+                    (inverse_id, relation_id),
+                )
+        await self._db.commit()
+        return applied
+
+    async def _resolve_optional_node_type_id(
+        self, workspace_id: str, name: str | None, label: str
+    ) -> str | None:
+        if name is None:
+            return None
+        node_type = await self.resolve_node_type(workspace_id, name)
+        if node_type is None:
+            raise ValueError(f"{label} not found: {name}")
+        return node_type["id"]
+
+    @staticmethod
+    def _merge_schema(existing: dict, incoming: dict) -> dict:
+        """Union-merge template schema props and required fields."""
+        existing_props = set(existing.get("props", []) or [])
+        incoming_props = set(incoming.get("props", []) or [])
+        existing_required = set(existing.get("required", []) or [])
+        incoming_required = set(incoming.get("required", []) or [])
+        return {
+            "props": sorted(existing_props | incoming_props),
+            "required": sorted(existing_required | incoming_required),
+        }
+
+    # ------------------------------------------------------------------
+    # Template versioning
+    # ------------------------------------------------------------------
+
+    async def upgrade_template(
+        self,
+        workspace_id: str,
+        target_version: str,
+        workspace_store=None,
+        dry_run: bool = False,
+        confirm: bool = False,
+    ) -> dict:
+        """Upgrade the workspace's last-applied template to target_version."""
+        if workspace_store is None:
+            raise ValueError("workspace_store is required for upgrade_template")
+        workspace = await workspace_store.get_workspace(workspace_id)
+        if workspace is None:
+            raise ValueError(f"Workspace not found: {workspace_id}")
+
+        template_name = workspace.get("template_id")
+        if template_name is None:
+            raise ValueError(
+                f"Workspace {workspace_id} has no template applied; "
+                "call apply_template first"
+            )
+        current_version = workspace.get("template_version") or "1.0"
+
+        comparison = self._compare_versions(current_version, target_version)
+        if comparison == 0:
+            raise ValueError(f"Already at version {target_version}")
+        if comparison > 0:
+            raise ValueError(
+                f"Downgrade {current_version} -> {target_version} not supported; "
+                "use downgrade_template"
+            )
+        if self._is_major_bump(current_version, target_version) and not confirm:
+            raise ValueError(
+                f"Major bump {current_version} -> {target_version} requires "
+                "confirm=True"
+            )
+
+        current_template = self._get_template_at_version(
+            template_name, current_version
+        )
+        target_template = self._get_template_at_version(template_name, target_version)
+        diff = self._diff_templates(current_template, target_template)
+
+        if dry_run:
+            return diff
+
+        await self._apply_template_node_types(
+            workspace_id, diff["added"]["node_types"]
+        )
+        await self._apply_template_relation_types(
+            workspace_id, diff["added"]["relation_types"]
+        )
+
+        for removed in diff["removed"]["node_types"]:
+            row = await self._get_node_type_by_name(workspace_id, removed["name"])
+            if row is not None:
+                await self._soft_delete_type("node_types", row["id"])
+        for removed in diff["removed"]["relation_types"]:
+            row = await self._get_relation_type_by_name(
+                workspace_id, removed["name"]
+            )
+            if row is not None:
+                await self._soft_delete_type("relation_types", row["id"])
+
+        await self._apply_template_node_types(
+            workspace_id,
+            [item["target"] for item in diff["modified"]["node_types"]],
+        )
+        await self._apply_template_relation_types(
+            workspace_id,
+            [item["target"] for item in diff["modified"]["relation_types"]],
+        )
+
+        await workspace_store.update_workspace(
+            workspace_id, template_version=target_version
+        )
+        return diff
+
+    async def downgrade_template(
+        self,
+        workspace_id: str,
+        target_version: str,
+        workspace_store=None,
+    ) -> dict:
+        """Downgrades are intentionally refused to avoid data loss."""
+        raise ValueError("Downgrades not supported - data loss risk")
+
+    @staticmethod
+    def _parse_version(version: str) -> tuple[int, int, int]:
+        parts = version.split(".")
+        numbers = [int(part) for part in parts[:3]]
+        numbers.extend([0] * (3 - len(numbers)))
+        return numbers[0], numbers[1], numbers[2]
+
+    @classmethod
+    def _compare_versions(cls, current: str, target: str) -> int:
+        current_parts = cls._parse_version(current)
+        target_parts = cls._parse_version(target)
+        return (current_parts > target_parts) - (current_parts < target_parts)
+
+    @classmethod
+    def _is_major_bump(cls, current: str, target: str) -> bool:
+        return cls._parse_version(target)[0] > cls._parse_version(current)[0]
+
+    @staticmethod
+    def _get_template_at_version(template_name: str, version: str) -> dict:
+        from brain_agent.memory.templates import get_template
+
+        if version == "1.0":
+            template = get_template(template_name)
+            if template["version"] == "1.0":
+                return template
+
+        import importlib
+
+        module_suffix = template_name.replace("-", "_")
+        major, minor, _patch = OntologyStore._parse_version(version)
+        module_name = f"brain_agent.memory.templates.{module_suffix}_v{major}_{minor}"
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError as exc:
+            raise ValueError(
+                f"No template module found for {template_name}@{version}"
+            ) from exc
+        if module.TEMPLATE["version"] != version:
+            raise ValueError(
+                f"Module {module_name} declares version "
+                f"{module.TEMPLATE['version']} but asked for {version}"
+            )
+        return module.TEMPLATE
+
+    @staticmethod
+    def _diff_templates(current: dict, target: dict) -> dict:
+        current_nodes = {item["name"]: item for item in current.get("node_types", [])}
+        target_nodes = {item["name"]: item for item in target.get("node_types", [])}
+        current_relations = {
+            item["name"]: item for item in current.get("relation_types", [])
+        }
+        target_relations = {
+            item["name"]: item for item in target.get("relation_types", [])
+        }
+
+        added_nodes = [
+            target_nodes[name] for name in target_nodes if name not in current_nodes
+        ]
+        removed_nodes = [
+            current_nodes[name] for name in current_nodes if name not in target_nodes
+        ]
+        modified_nodes: list[dict] = []
+        warnings: list[str] = []
+        for name in sorted(set(current_nodes) & set(target_nodes)):
+            current_node = current_nodes[name]
+            target_node = target_nodes[name]
+            current_props = set(
+                current_node.get("schema", {}).get("props", []) or []
+            )
+            target_props = set(target_node.get("schema", {}).get("props", []) or [])
+            current_required = set(
+                current_node.get("schema", {}).get("required", []) or []
+            )
+            target_required = set(
+                target_node.get("schema", {}).get("required", []) or []
+            )
+            if (
+                current_props != target_props
+                or current_required != target_required
+                or current_node.get("parent") != target_node.get("parent")
+            ):
+                modified_nodes.append(
+                    {"name": name, "current": current_node, "target": target_node}
+                )
+                newly_required = target_required - current_required
+                if newly_required:
+                    warnings.append(
+                        f"Node type '{name}' now requires "
+                        f"{sorted(newly_required)}; existing rows missing "
+                        "these props will need curation"
+                    )
+
+        added_relations = [
+            target_relations[name]
+            for name in target_relations
+            if name not in current_relations
+        ]
+        removed_relations = [
+            current_relations[name]
+            for name in current_relations
+            if name not in target_relations
+        ]
+        modified_relations: list[dict] = []
+        for name in sorted(set(current_relations) & set(target_relations)):
+            current_relation = current_relations[name]
+            target_relation = target_relations[name]
+            if (
+                current_relation.get("domain") != target_relation.get("domain")
+                or current_relation.get("range") != target_relation.get("range")
+                or bool(current_relation.get("transitive"))
+                != bool(target_relation.get("transitive"))
+                or bool(current_relation.get("symmetric"))
+                != bool(target_relation.get("symmetric"))
+                or current_relation.get("inverse_of")
+                != target_relation.get("inverse_of")
+            ):
+                modified_relations.append(
+                    {
+                        "name": name,
+                        "current": current_relation,
+                        "target": target_relation,
+                    }
+                )
+
+        return {
+            "added": {
+                "node_types": added_nodes,
+                "relation_types": added_relations,
+            },
+            "removed": {
+                "node_types": removed_nodes,
+                "relation_types": removed_relations,
+            },
+            "modified": {
+                "node_types": modified_nodes,
+                "relation_types": modified_relations,
+            },
+            "warnings": warnings,
+        }
+
+    async def _soft_delete_type(self, table: str, type_id: str) -> None:
+        if table not in {"node_types", "relation_types"}:
+            raise ValueError(f"Unsupported ontology table: {table}")
+        assert self._db is not None
+        await self._db.execute(
+            f"UPDATE {table} SET deprecated = 1 WHERE id = ?",
+            (type_id,),
+        )
+        await self._db.commit()
 
     async def _propose(
         self,
