@@ -287,7 +287,7 @@ Cell assemblies (hyperedges) enable group-level memory: when one member of an as
 
 A workspace-aware curation layer sits on top of the 6-layer memory system. It turns CBA from a general conversational agent into a **business-logic curator** for coding agents: you feed in specs, decisions, PDFs, or ad-hoc chat, and the system stores them losslessly, partitions them by project, detects contradictions, asks when something's ambiguous, and exposes the curated context for downstream tools.
 
-**Status:** architectural design complete (see `docs/knowledge_layer_plan.md`, local-only), Phase 0 foundation landing. Phases 1–8 scoped as separate TDD plans.
+**Status:** architectural design complete (see `docs/knowledge_layer_plan.md`, local-only). Implementation is landing phase by phase; foundation and storage pieces are in progress, with later integration work kept behind separate TDD plans.
 
 ### What it adds
 
@@ -426,7 +426,7 @@ pytest --cov            # With coverage
 
 | Branch | Description |
 |--------|-------------|
-| `main` | Stable release. Knowledge Layer foundation (Phase 0) in progress. |
+| `main` | Stable release. Knowledge Layer work in progress. |
 | `graphify` | Knowledge graph analysis: Leiden clustering, cell assemblies, MCP metacognition, dashboard viz |
 | `openclaw` | Extended features: MCP, tool system, middleware |
 
