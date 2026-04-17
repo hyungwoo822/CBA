@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-16
 **Branch:** saju (local only)
-**Status:** Phase 3 complete - moving to Phase 4
+**Status:** Phase 4 complete - moving to Phase 5
 
 ---
 
@@ -1497,6 +1497,8 @@ class ExtractionOrchestrator:
 ---
 
 ### Phase 4 — Personal Workspace Adapter
+
+**Status:** Phase 4 complete - personal workspace adapter live, identity_facts callers untouched
 
 **목표:** 기존 identity_facts 를 personal workspace 인터페이스로 감싸기
 **산출물:** `brain_agent/memory/personal_adapter.py`
