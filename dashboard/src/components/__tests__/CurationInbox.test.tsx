@@ -62,4 +62,9 @@ describe('CurationInbox frame', () => {
     closeBtn.click()
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+
+  it('opens beside the connected HUD panel by default', () => {
+    render(<CurationInbox open={true} onClose={() => {}} />)
+    expect(document.querySelector('.kl-modal')).toHaveStyle({ left: '324px', top: '82px' })
+  })
 })

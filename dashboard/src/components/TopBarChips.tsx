@@ -40,6 +40,25 @@ export function TopBarChips() {
         title="LLM models"
       >
         Models
+        <svg
+          className="top-chip-icon"
+          data-testid="models-icon"
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 3v18" />
+          <path d="M5 8h14" />
+          <path d="M5 16h14" />
+          <circle cx="8" cy="8" r="2" />
+          <circle cx="16" cy="16" r="2" />
+        </svg>
       </button>
     </div>
   )

@@ -24,7 +24,8 @@ export function CurationInbox({
     decideProposal,
   } = useCurationInbox()
   const [tab, setTab] = useState<Tab>('questions')
-  const { style, onMouseDown } = useModalDrag('curation-inbox', window.innerWidth - 400, 80)
+  const defaultX = Math.max(12, Math.min(324, window.innerWidth - 400))
+  const { style, onMouseDown } = useModalDrag('curation-inbox', defaultX, 82)
 
   useEffect(() => {
     ;(window as any).__openCurationInbox = () => {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useBrainStore } from '../../stores/brainState'
 import { WorkspaceSelector } from '../WorkspaceSelector'
@@ -33,5 +33,15 @@ describe('WorkspaceSelector', () => {
       expect(putCall?.[0]).toBe('/api/workspaces/current')
       expect(JSON.parse(putCall?.[1].body).workspace_id).toBe('w1')
     })
+  })
+
+  it('shows the current workspace in the menu when the workspace list has not loaded', () => {
+    useBrainStore.setState({
+      workspaces: [],
+      currentWorkspace: { id: 'personal', name: 'Personal Knowledge', decay_policy: 'normal' },
+    })
+    render(<WorkspaceSelector />)
+    fireEvent.click(screen.getByTestId('workspace-selector-btn'))
+    expect(within(screen.getByRole('menu')).getByText('Personal Knowledge')).toBeInTheDocument()
   })
 })

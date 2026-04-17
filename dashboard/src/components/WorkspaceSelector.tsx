@@ -4,6 +4,9 @@ import { useWorkspace } from '../hooks/useWorkspace'
 export function WorkspaceSelector() {
   const { current, workspaces, setCurrent } = useWorkspace()
   const [open, setOpen] = useState(false)
+  const options = current && !workspaces.some((workspace) => workspace.id === current.id)
+    ? [current, ...workspaces]
+    : workspaces
 
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
@@ -19,7 +22,7 @@ export function WorkspaceSelector() {
       </button>
       {open && (
         <div role="menu" className="top-chip-menu">
-          {workspaces.map((workspace) => (
+          {options.map((workspace) => (
             <button
               key={workspace.id}
               type="button"

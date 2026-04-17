@@ -38,6 +38,11 @@ describe('TopBarChips', () => {
     expect(screen.getByTestId('inbox-count')).toHaveTextContent('1')
   })
 
+  it('renders a model icon next to Models', () => {
+    render(<TopBarChips />)
+    expect(screen.getByTestId('models-icon')).toBeInTheDocument()
+  })
+
   it('opens inbox / export / models modals via window hooks', () => {
     render(<TopBarChips />)
     fireEvent.click(screen.getByRole('button', { name: /Inbox/i }))

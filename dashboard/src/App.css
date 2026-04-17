@@ -36,6 +36,7 @@ body {
 
 .top-nav {
   height: 72px; flex-shrink: 0;
+  position: relative;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 24px;
   background: rgba(24, 24, 38, 0.98);
@@ -1062,6 +1063,10 @@ body {
 }
 .top-chip-caret {
   font-size: 8px; opacity: 0.5; margin-left: 2px;
+}
+.top-chip-icon {
+  width: 13px; height: 13px;
+  opacity: 0.72;
 }
 .top-chip-menu {
   position: absolute; top: calc(100% + 6px); left: 0;
