@@ -1,6 +1,8 @@
 """Question and contradiction curation endpoints."""
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -10,10 +12,19 @@ class AnswerBody(BaseModel):
     answer_source: str = "user"
 
 
+ConfidenceLabel = Literal[
+    "PROVISIONAL",
+    "STABLE",
+    "CANONICAL",
+    "EXTRACTED",
+    "USER_GROUND_TRUTH",
+]
+
+
 class ResolveBody(BaseModel):
     resolution: str
     resolved_by: str = "user"
-    resolution_confidence: str = "EXTRACTED"
+    resolution_confidence: ConfidenceLabel = "EXTRACTED"
 
 
 def build_router(state: dict) -> APIRouter:

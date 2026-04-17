@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import { lazy, Suspense, useEffect, useState } from 'react'
+import { useModalDrag } from '../hooks/useModalDrag'
 import { useBrainStore } from '../stores/brainState'
 
 const MonacoEditor = lazy(() => import('@monaco-editor/react').then((module) => ({ default: module.default })))
@@ -28,6 +29,7 @@ export function ExportPreviewModal({
     include_raw_vault: false,
   })
   const [json, setJson] = useState('{}')
+  const { style, onMouseDown } = useModalDrag('export-preview-modal', 60, 80)
 
   useEffect(() => {
     if (!currentWorkspace?.id) return
@@ -48,54 +50,37 @@ export function ExportPreviewModal({
   if (!open) return null
 
   const options = workspaces.length ? workspaces : currentWorkspace ? [currentWorkspace] : []
+  const modalStyle: CSSProperties = {
+    ...style,
+    width: 'min(900px, 92vw)',
+    height: 'min(720px, 82vh)',
+  }
 
   return (
-    <div style={{
-      position: 'fixed',
-      inset: 40,
-      zIndex: 1500,
-      background: 'rgba(15,23,42,0.97)',
-      border: '1px solid rgba(20,184,166,0.38)',
-      borderRadius: 8,
-      display: 'flex',
-      flexDirection: 'column',
-      overflow: 'hidden',
-    }}>
-      <div style={{
-        padding: '8px 12px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        background: 'rgba(20,184,166,0.14)',
-      }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#5eead4' }}>
-          Export Preview (MCP JSON)
-        </span>
-        <button onClick={onClose} style={{
-          background: 'none',
-          border: 'none',
-          color: '#94a3b8',
-          cursor: 'pointer',
-          fontSize: 18,
-        }}>
+    <div className="kl-modal" style={modalStyle} onMouseDown={onMouseDown}>
+      <div className="kl-modal-header" data-drag-handle>
+        <span className="kl-modal-title">Export Preview (MCP JSON)</span>
+        <button
+          type="button"
+          className="kl-modal-close"
+          aria-label="Close"
+          onClick={onClose}
+        >
           &times;
         </button>
       </div>
-      <div style={{
-        display: 'flex',
-        gap: 12,
-        padding: 8,
-        alignItems: 'center',
-        borderBottom: '1px solid rgba(148,163,184,0.15)',
-        flexWrap: 'wrap',
-      }}>
-        <select value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} style={{ padding: '3px 6px', fontSize: 11 }}>
+      <div className="kl-modal-toolbar">
+        <select
+          value={workspaceId}
+          onChange={(event) => setWorkspaceId(event.target.value)}
+          aria-label="workspace"
+        >
           {options.map((workspace) => (
             <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
           ))}
           {!options.length && <option value="personal">personal</option>}
         </select>
-        <label style={labelStyle}>
+        <label>
           <input
             type="checkbox"
             checked={filters.never_decay_only}
@@ -104,7 +89,7 @@ export function ExportPreviewModal({
           />
           never_decay_only
         </label>
-        <label style={labelStyle}>
+        <label>
           min_importance:
           <input
             type="number"
@@ -113,22 +98,21 @@ export function ExportPreviewModal({
             step={0.1}
             value={filters.min_importance}
             onChange={(event) => setFilters((current) => ({ ...current, min_importance: Number(event.target.value) }))}
-            style={{ width: 50, marginLeft: 4 }}
+            style={{ width: 58 }}
           />
         </label>
-        <label style={labelStyle}>
+        <label>
           min_confidence:
           <select
             value={filters.min_confidence}
             onChange={(event) => setFilters((current) => ({ ...current, min_confidence: event.target.value }))}
-            style={{ marginLeft: 4, padding: '2px 4px', fontSize: 10 }}
           >
             {['PROVISIONAL', 'STABLE', 'CANONICAL', 'USER_GROUND_TRUTH'].map((confidence) => (
               <option key={confidence} value={confidence}>{confidence}</option>
             ))}
           </select>
         </label>
-        <label style={labelStyle}>
+        <label>
           <input
             type="checkbox"
             checked={filters.include_raw_vault}
@@ -136,8 +120,16 @@ export function ExportPreviewModal({
           />
           include_raw_vault
         </label>
-        <button onClick={() => { void navigator.clipboard?.writeText(json) }} style={buttonStyle('#22c55e')}>Copy</button>
         <button
+          type="button"
+          className="kl-modal-btn"
+          onClick={() => { void navigator.clipboard?.writeText(json) }}
+        >
+          Copy
+        </button>
+        <button
+          type="button"
+          className="kl-modal-btn primary"
           onClick={() => {
             const blob = new Blob([json], { type: 'application/json' })
             const url = URL.createObjectURL(blob)
@@ -147,13 +139,12 @@ export function ExportPreviewModal({
             anchor.click()
             URL.revokeObjectURL(url)
           }}
-          style={buttonStyle('#60a5fa')}
         >
           Download
         </button>
       </div>
       <div style={{ flex: 1, minHeight: 0 }}>
-        <Suspense fallback={<pre style={{ padding: 10, fontSize: 10, color: '#e2e8f0' }}>{json}</pre>}>
+        <Suspense fallback={<pre style={{ padding: 10, fontSize: 10, color: 'var(--text-primary)' }}>{json}</pre>}>
           <MonacoEditor
             height="100%"
             language="json"
@@ -166,21 +157,3 @@ export function ExportPreviewModal({
     </div>
   )
 }
-
-const labelStyle: CSSProperties = {
-  fontSize: 10,
-  color: '#cbd5e1',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 3,
-}
-
-const buttonStyle = (background: string): CSSProperties => ({
-  padding: '3px 10px',
-  fontSize: 10,
-  background,
-  color: '#0a0a14',
-  border: 'none',
-  borderRadius: 3,
-  cursor: 'pointer',
-})

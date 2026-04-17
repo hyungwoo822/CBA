@@ -162,7 +162,7 @@ class ConsolidationEngine:
         ach_transfer_factor = 1.0 + 0.8 * (0.5 - ach_level)  # [0.6, 1.4]
         ach_transfer_factor = max(0.6, min(1.4, ach_transfer_factor))
 
-        memories = await self._staging.get_unconsolidated()
+        memories = await self._staging.get_unconsolidated(workspace_id=None)
         memories.sort(
             key=lambda m: m["emotional_tag"].get("arousal", 0), reverse=True
         )

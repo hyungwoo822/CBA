@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useBrainStore } from '../stores/brainState'
 import { REGION_CONFIG } from '../constants/brainRegions'
-import { WorkspaceSelector } from './WorkspaceSelector'
 
 const MODE_STYLES: Record<string, { label: string; bg: string; color: string; border: string }> = {
   executive_control: { label: 'ECN', bg: 'rgba(249,115,22,0.12)', color: '#f97316', border: 'rgba(249,115,22,0.15)' },
@@ -25,7 +24,6 @@ export function HUD() {
   const connected = useBrainStore((s) => s.connected)
   const selectedRegion = useBrainStore((s) => s.selectedRegion)
   const setSelectedRegion = useBrainStore((s) => s.setSelectedRegion)
-  const openQuestionCount = useBrainStore((s) => s.openQuestions.length)
   const [showRegions, setShowRegions] = useState(true)
 
   const modeStyle = MODE_STYLES[mode] || { label: 'CRE', bg: 'rgba(139,92,246,0.12)', color: '#8b5cf6', border: 'rgba(139,92,246,0.15)' }
@@ -33,54 +31,6 @@ export function HUD() {
 
   return (
     <div className="hud">
-      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
-        <WorkspaceSelector />
-        <button
-          onClick={() => { (window as any).__setInboxOpen?.(true) }}
-          title="Curation Inbox"
-          style={{
-            padding: '3px 7px',
-            borderRadius: 3,
-            background: 'rgba(96,165,250,0.12)',
-            color: '#60a5fa',
-            fontSize: 10,
-            cursor: 'pointer',
-            border: 'none',
-          }}
-        >
-          Inbox (<span data-testid="inbox-count">{openQuestionCount}</span>)
-        </button>
-        <button
-          onClick={() => { (window as any).__setExportOpen?.(true) }}
-          title="Export preview"
-          style={{
-            padding: '3px 7px',
-            borderRadius: 3,
-            background: 'rgba(34,197,94,0.12)',
-            color: '#86efac',
-            cursor: 'pointer',
-            fontSize: 10,
-            border: 'none',
-          }}
-        >
-          Export
-        </button>
-        <button
-          onClick={() => { (window as any).__setModelSelectorOpen?.(true) }}
-          title="LLM models"
-          style={{
-            padding: '3px 7px',
-            borderRadius: 3,
-            background: 'rgba(20,184,166,0.14)',
-            color: '#5eead4',
-            cursor: 'pointer',
-            fontSize: 10,
-            border: 'none',
-          }}
-        >
-          Models
-        </button>
-      </div>
       <div className="status-row">
         <div
           className="status-dot"

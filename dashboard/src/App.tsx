@@ -18,6 +18,7 @@ import { InteractionModeToggle } from './components/InteractionModeToggle'
 import { CurationInbox } from './components/CurationInbox'
 import { ExportPreviewModal } from './components/ExportPreviewModal'
 import { ModelSelector } from './components/ModelSelector'
+import { TopBarChips } from './components/TopBarChips'
 import { useWebSocket } from './hooks/useWebSocket'
 import { resetAllPositions } from './hooks/useDraggable'
 import { useBrainStore } from './stores/brainState'
@@ -240,6 +241,7 @@ function App() {
               <path d="M3 3v5h5"/>
             </svg>
           </button>
+          <TopBarChips />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <ChannelToggle />

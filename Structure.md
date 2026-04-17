@@ -40,6 +40,7 @@ Fast navigation index for this repo. Read this **before** exploring the codebase
 | `test_phase6_edge_decay.py` | Phase 6 semantic edge decay/prune tests for workspace, importance, and never_decay |
 | `test_phase6_forgetting.py` | Phase 6 ForgettingEngine policy, never_decay, and importance-scaling tests |
 | `test_phase6_smoke.py` | Phase 6 mixed-workspace end-to-end decay smoke tests |
+| `test_phase9_audit_fixes.py` | Phase 9 audit regression tests for staging defaults, curation confidence labels, and template composition |
 | `test_retrieve_with_contradictions.py` | Phase 5 retrieval post-processing tests for contradictions and reconstruction gaps |
 | `test_apply_template.py` | Phase 7 template application, composition, canonical confidence, and workspace isolation tests |
 | `test_templates_smoke.py` | Phase 7 end-to-end smoke for all bundled templates and universal overlay |
@@ -328,6 +329,7 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 | `src/test/setup.ts` | Vitest + Testing Library setup |
 | `src/__smoke__.test.ts` | Frontend test-runner smoke test |
 | `src/hooks/useDraggable.ts` | Modal dragging |
+| `src/hooks/useModalDrag.ts` | Phase 9 wrapper around useDraggable returning style + onMouseDown for kl-modal frames |
 | `src/constants/brainRegions.ts` | 3D coords + region metadata |
 | `src/utils/fresnelMaterial.ts` | Three.js shader |
 
@@ -337,7 +339,7 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 |---|---|
 | `BrainScene.tsx` / `BrainModel.tsx` / `RegionBubble.tsx` | 3D brain scene + region spheres |
 | `CurvedConnections.tsx` / `SignalParticles.tsx` | Neural connections + flowing particles |
-| `HUD.tsx` | Top overlay for network mode, NT bars, workspace, inbox, export, and model controls |
+| `HUD.tsx` | Top overlay for network mode, NT bars, and region activity |
 | `MemoryPanel.tsx` / `MemoryFlowBar.tsx` | Memory layer counts + flow |
 | `KnowledgeGraphPanel.tsx` / `KnowledgeGraphModal.tsx` | Force-directed KG viz with workspace filter, cross-refs, overlays, and raw-vault hover preview |
 | `EventLog.tsx` | WS event stream |
@@ -346,7 +348,7 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 | `ChannelToggle.tsx` | Discord/Telegram toggle |
 | `AudioOrb.tsx` | Voice input indicator |
 | `RegionDetailPanel.tsx` / `ProfileEditModal.tsx` | Region detail + identity edit modals |
-| `WorkspaceSelector.tsx` | Phase 8 HUD workspace dropdown and current workspace switcher |
+| `WorkspaceSelector.tsx` | Top-nav workspace dropdown and current workspace switcher |
 | `CurationInbox.tsx` | Phase 8 three-tab curation drawer for questions, contradictions, and proposals |
 | `QuestionCard.tsx` | Phase 8 open-question answer card |
 | `ContradictionCard.tsx` | Phase 8 contradiction resolution card |
@@ -355,6 +357,7 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 | `TimelineView.tsx` | Phase 8 temporal supersede-chain visualization component |
 | `ExportPreviewModal.tsx` | Phase 8 export JSON preview modal with filters, copy, download, and lazy Monaco viewer |
 | `ModelSelector.tsx` | Phase 8 per-stage extraction model selector drawer driven by `/api/llm/providers` |
+| `TopBarChips.tsx` | Phase 9 single-row chip for workspace/inbox/export/models mounted in top-nav |
 
 ### `dashboard/src/components/__tests__/` — Phase 8 Component Tests
 
@@ -365,6 +368,7 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 | `DualChannelSync.test.tsx` | Inbox optimistic removal and WS-style question_answered sync tests |
 | `ExportPreviewModal.test.tsx` | Export preview fetch, filter refetch, and clipboard tests |
 | `ModelSelector.test.tsx` | Model selector API-driven dropdown and unavailable reason tests |
+| `TopBarChips.test.tsx` | Phase 9 TopBarChips placement, inbox-count badge, and open-toggle action tests |
 
 ---
 

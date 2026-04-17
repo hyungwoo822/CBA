@@ -46,3 +46,20 @@ describe('CurationInbox', () => {
     expect(useBrainStore.getState().openQuestions).toHaveLength(0)
   })
 })
+
+describe('CurationInbox frame', () => {
+  it('renders a draggable header with a data-drag-handle attribute', () => {
+    render(<CurationInbox open={true} onClose={() => {}} />)
+    const header = document.querySelector('.kl-modal-header')
+    expect(header).toBeTruthy()
+    expect(header?.hasAttribute('data-drag-handle')).toBe(true)
+  })
+
+  it('renders an accessible close button that fires onClose', () => {
+    const onClose = vi.fn()
+    render(<CurationInbox open={true} onClose={onClose} />)
+    const closeBtn = screen.getByRole('button', { name: /close/i })
+    closeBtn.click()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})

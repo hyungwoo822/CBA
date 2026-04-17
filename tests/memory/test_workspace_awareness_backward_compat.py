@@ -32,4 +32,4 @@ def test_staging_get_unconsolidated_accepts_workspace_id():
 
     sig = inspect.signature(hippocampal_staging.HippocampalStaging.get_unconsolidated)
     assert "workspace_id" in sig.parameters
-    assert sig.parameters["workspace_id"].default is None
+    assert sig.parameters["workspace_id"].default == "personal"

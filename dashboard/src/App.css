@@ -1023,6 +1023,70 @@ body {
   width: 140px;
 }
 
+/* Top-bar chip row (workspace + curation shortcuts) */
+.top-chip-row {
+  display: flex; align-items: center; gap: 6px;
+}
+.top-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11px; font-weight: 500;
+  cursor: pointer; transition: all 0.2s;
+}
+.top-chip:hover {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.15);
+  color: var(--text-primary);
+}
+.top-chip.active,
+.top-chip[aria-expanded="true"] {
+  background: rgba(59,130,246,0.1);
+  border-color: rgba(59,130,246,0.3);
+  color: var(--text-primary);
+}
+.top-chip-count {
+  font-family: var(--font-mono);
+  font-size: 10px; font-weight: 700;
+  padding: 1px 6px; border-radius: 8px;
+  background: rgba(255,255,255,0.08);
+  color: var(--text-secondary);
+  min-width: 18px; text-align: center;
+}
+.top-chip-count.severe {
+  background: rgba(239,68,68,0.15);
+  color: #fca5a5;
+}
+.top-chip-caret {
+  font-size: 8px; opacity: 0.5; margin-left: 2px;
+}
+.top-chip-menu {
+  position: absolute; top: calc(100% + 6px); left: 0;
+  min-width: 200px; padding: 6px;
+  background: rgba(24,24,38,0.98); backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  z-index: 300;
+}
+.top-chip-menu-item {
+  display: block; width: 100%; padding: 6px 10px;
+  border: none; background: transparent; border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px; font-family: var(--font-ui); text-align: left;
+  cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.top-chip-menu-item:hover {
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+}
+.top-chip-menu-item.active {
+  background: rgba(59,130,246,0.1);
+  color: #60a5fa;
+}
+
 /* ──────────────────────────────────────
    Profile Edit Modal
    ────────────────────────────────────── */
@@ -1149,3 +1213,127 @@ body {
   background: rgba(6,182,212,0.04);
 }
 .profile-textarea::placeholder { color: var(--text-muted); opacity: 0.5; }
+
+/* Knowledge-layer modals (shared frame) */
+.kl-modal {
+  position: fixed;
+  background: var(--bg-panel);
+  backdrop-filter: var(--panel-blur);
+  -webkit-backdrop-filter: var(--panel-blur);
+  border: 1px solid var(--border);
+  border-radius: var(--panel-radius);
+  box-shadow: var(--panel-shadow);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  z-index: 800;
+  animation: fadeIn 0.2s ease;
+}
+.kl-modal-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px; flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  cursor: move;
+  user-select: none;
+}
+.kl-modal-title {
+  flex: 1;
+  font-size: 12px; font-weight: 500;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: rgba(148,163,184,0.7);
+}
+.kl-modal-close {
+  background: none; border: none;
+  color: var(--text-muted);
+  font-size: 20px; line-height: 1;
+  padding: 0 4px; cursor: pointer;
+  transition: color 0.15s;
+}
+.kl-modal-close:hover { color: var(--text-primary); }
+.kl-modal-body {
+  flex: 1; overflow-y: auto;
+  padding: 12px 14px;
+  scrollbar-width: none; -ms-overflow-style: none;
+}
+.kl-modal-body::-webkit-scrollbar { display: none; }
+.kl-modal-toolbar {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px; color: var(--text-secondary);
+}
+.kl-modal-toolbar label {
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.kl-modal-toolbar select,
+.kl-modal-toolbar input[type="number"] {
+  padding: 3px 6px;
+  font-size: 11px; font-family: var(--font-ui);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+}
+.kl-modal-toolbar select:focus,
+.kl-modal-toolbar input[type="number"]:focus {
+  border-color: var(--border-focus);
+}
+.kl-modal-btn {
+  padding: 4px 12px;
+  font-size: 11px; font-family: var(--font-ui); font-weight: 500;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.kl-modal-btn:hover {
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.15);
+  color: var(--text-primary);
+}
+.kl-modal-btn.primary {
+  background: rgba(59,130,246,0.1);
+  border-color: rgba(59,130,246,0.3);
+  color: #60a5fa;
+}
+.kl-modal-btn.primary:hover {
+  background: rgba(59,130,246,0.18);
+  border-color: rgba(59,130,246,0.45);
+  color: #93c5fd;
+}
+.kl-modal-tabs {
+  display: flex; gap: 2px; padding: 8px 12px 0;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.kl-modal-tab {
+  padding: 5px 10px; border: none; border-radius: 8px 8px 0 0;
+  background: transparent; color: var(--text-muted);
+  font-size: 10px; font-weight: 500;
+  font-family: var(--font-ui);
+  cursor: pointer; transition: all 0.2s;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.kl-modal-tab:hover {
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.03);
+}
+.kl-modal-tab.active {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.06);
+  border-bottom: 2px solid var(--blue);
+}
+.kl-modal-tab-count {
+  font-family: var(--font-mono); font-size: 9px;
+  padding: 1px 5px; border-radius: 8px;
+  background: rgba(255,255,255,0.08);
+  color: var(--text-secondary);
+}
+.kl-modal-tab-count.severe {
+  background: rgba(239,68,68,0.15);
+  color: #fca5a5;
+}

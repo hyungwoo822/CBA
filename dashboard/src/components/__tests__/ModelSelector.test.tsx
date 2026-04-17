@@ -39,3 +39,22 @@ describe('ModelSelector', () => {
     expect(optionTexts.filter((text) => text?.includes('ollama/llama3')).length).toBeGreaterThan(0)
   })
 })
+
+describe('ModelSelector frame', () => {
+  it('renders a draggable header with a data-drag-handle attribute', async () => {
+    render(<ModelSelector open={true} onClose={() => {}} />)
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
+    const header = document.querySelector('.kl-modal-header')
+    expect(header).toBeTruthy()
+    expect(header?.hasAttribute('data-drag-handle')).toBe(true)
+  })
+
+  it('renders an accessible close button that fires onClose', async () => {
+    const onClose = vi.fn()
+    render(<ModelSelector open={true} onClose={onClose} />)
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
+    const closeBtn = screen.getByRole('button', { name: /close/i })
+    closeBtn.click()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})

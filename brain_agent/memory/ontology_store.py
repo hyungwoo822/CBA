@@ -781,6 +781,11 @@ class OntologyStore:
             range_id = await self._resolve_optional_node_type_id(
                 workspace_id, relation_type.get("range"), f"Relation {name} range"
             )
+            inverse_id = None
+            inverse_name = relation_type.get("inverse_of")
+            if inverse_name is not None:
+                inverse = await self.resolve_relation_type(workspace_id, inverse_name)
+                inverse_id = inverse["id"] if inverse is not None else None
             existing = await self._get_relation_type_by_name(workspace_id, name)
 
             if existing is None:
@@ -798,9 +803,10 @@ class OntologyStore:
                 await self._db.execute(
                     """
                     UPDATE relation_types
-                    SET domain_type_id = ?, range_type_id = ?,
+                    SET domain_type_id = COALESCE(?, domain_type_id),
+                        range_type_id = COALESCE(?, range_type_id),
                         transitive = transitive | ?, symmetric = symmetric | ?,
-                        inverse_of = NULL,
+                        inverse_of = COALESCE(?, inverse_of),
                         source_id = 'template', source_snippet = ?
                     WHERE id = ?
                     """,
@@ -809,6 +815,7 @@ class OntologyStore:
                         range_id,
                         int(bool(relation_type.get("transitive", False))),
                         int(bool(relation_type.get("symmetric", False))),
+                        inverse_id,
                         f"template:{name}",
                         existing["id"],
                     ),
