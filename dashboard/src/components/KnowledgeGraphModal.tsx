@@ -1,17 +1,28 @@
 import { useState } from 'react'
 import { useDraggable } from '../hooks/useDraggable'
+import { useBrainStore } from '../stores/brainState'
 import KnowledgeGraphPanel from './KnowledgeGraphPanel'
+import { RawVaultPanel } from './RawVaultPanel'
 
 const MODAL_W = 520
 const MODAL_H = 420
 
 export default function KnowledgeGraphModal() {
   const [open, setOpen] = useState(false)
+  const workspaces = useBrainStore((s) => s.workspaces)
+  const currentWorkspace = useBrainStore((s) => s.currentWorkspace)
+  const [scopedWorkspace, setScopedWorkspace] = useState<string | 'all'>('all')
+  const [showCrossRefs, setShowCrossRefs] = useState(true)
+  const [importanceOverlay, setImportanceOverlay] = useState(false)
+  const [neverDecayHighlight, setNeverDecayHighlight] = useState(false)
+  const [hoverSource, setHoverSource] = useState<string | null>(null)
   const { pos, onMouseDown } = useDraggable(
     'knowledge-graph-modal',
     Math.round((window.innerWidth - MODAL_W) / 2),
     Math.round((window.innerHeight - MODAL_H) / 2),
   )
+  const effectiveWorkspace = scopedWorkspace === 'all' ? undefined : scopedWorkspace
+  const workspaceOptions = workspaces.length ? workspaces : currentWorkspace ? [currentWorkspace] : []
 
   return (
     <>
@@ -98,11 +109,66 @@ export default function KnowledgeGraphModal() {
             </button>
           </div>
           {/* Graph content */}
+          <div style={{
+            display: 'flex',
+            gap: 8,
+            alignItems: 'center',
+            padding: '4px 10px',
+            background: 'rgba(0,0,0,0.12)',
+            flexWrap: 'wrap',
+          }}>
+            <select
+              value={scopedWorkspace}
+              onChange={(event) => setScopedWorkspace(event.target.value)}
+              style={{
+                background: 'rgba(0,0,0,0.25)',
+                border: '1px solid rgba(20,184,166,0.25)',
+                color: '#5eead4',
+                fontSize: 10,
+                padding: '2px 6px',
+                borderRadius: 3,
+              }}
+            >
+              <option value="all">All workspaces</option>
+              {workspaceOptions.map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+              ))}
+            </select>
+            <label style={toolbarLabel}>
+              <input type="checkbox" checked={showCrossRefs} onChange={(event) => setShowCrossRefs(event.target.checked)} />
+              Cross-refs
+            </label>
+            <label style={toolbarLabel}>
+              <input type="checkbox" checked={importanceOverlay} onChange={(event) => setImportanceOverlay(event.target.checked)} />
+              Importance
+            </label>
+            <label style={toolbarLabel}>
+              <input type="checkbox" checked={neverDecayHighlight} onChange={(event) => setNeverDecayHighlight(event.target.checked)} />
+              Never decay
+            </label>
+          </div>
           <div style={{ flex: 1, minHeight: 0 }}>
-            <KnowledgeGraphPanel width={MODAL_W - 2} height={MODAL_H - 30} />
+            <KnowledgeGraphPanel
+              width={MODAL_W - 2}
+              height={MODAL_H - 62}
+              workspaceId={effectiveWorkspace}
+              includeCrossRefs={showCrossRefs}
+              importanceOverlay={importanceOverlay}
+              neverDecayHighlight={neverDecayHighlight}
+              onNodeHoverSourceRef={setHoverSource}
+            />
           </div>
         </div>
       )}
+      <RawVaultPanel sourceId={hoverSource} onClose={() => setHoverSource(null)} />
     </>
   )
+}
+
+const toolbarLabel: React.CSSProperties = {
+  fontSize: 10,
+  color: '#94a3b8',
+  display: 'flex',
+  gap: 4,
+  alignItems: 'center',
 }

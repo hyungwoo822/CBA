@@ -363,6 +363,58 @@ class SemanticStore:
         )
         await self._graph_db.commit()
 
+    async def add_edge(
+        self,
+        subject: str,
+        relation: str,
+        target: str,
+        weight: float = 0.5,
+        category: str = "GENERAL",
+        confidence: str = "INFERRED",
+        origin: str = "unknown",
+        workspace_id: str = "personal",
+        target_workspace_id: str | None = None,
+        source_ref: str | None = None,
+        valid_from: str | None = None,
+        epistemic_source: str = "asserted",
+        importance_score: float = 0.5,
+        never_decay: bool = False,
+        supersedes: str | None = None,
+    ) -> dict:
+        """Compatibility wrapper returning the inserted or reinforced KG edge."""
+        await self.add_relationship(
+            source=subject,
+            relation=relation,
+            target=target,
+            weight=weight,
+            category=category,
+            confidence=confidence,
+            origin=origin,
+            workspace_id=workspace_id,
+            target_workspace_id=target_workspace_id,
+            source_ref=source_ref,
+            valid_from=valid_from,
+            epistemic_source=epistemic_source,
+            importance_score=importance_score,
+            never_decay=never_decay,
+        )
+        edge = await self._find_edge(
+            workspace_id=workspace_id,
+            source_node=subject,
+            relation=relation,
+            target_node=target,
+            origin=origin,
+        )
+        if edge is None:
+            raise RuntimeError("edge insert succeeded but edge lookup failed")
+        if supersedes:
+            await self.mark_superseded(
+                supersedes,
+                valid_to=edge.get("valid_from") or edge.get("first_seen") or _now(),
+                superseded_by=edge["id"],
+            )
+        return edge
+
     async def get_relationships(
         self,
         node: str,
@@ -455,6 +507,60 @@ class SemanticStore:
                 "never_decay": r[17],
             }
             for r in rows
+        ]
+
+    async def list_edges(self, workspace_id: str | None = None) -> list[dict]:
+        """Return KG edges with dashboard/export-friendly field names."""
+        return [self._edge_for_api(edge) for edge in await self.get_edges(workspace_id)]
+
+    async def count_edges(self, workspace_id: str | None = None) -> int:
+        assert self._graph_db is not None
+        if workspace_id is None:
+            sql = "SELECT COUNT(*) FROM knowledge_graph"
+            args: tuple = ()
+        else:
+            sql = "SELECT COUNT(*) FROM knowledge_graph WHERE workspace_id = ?"
+            args = (workspace_id,)
+        async with self._graph_db.execute(sql, args) as cursor:
+            row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def count_nodes(self, workspace_id: str | None = None) -> int:
+        edges = await self.get_edges(workspace_id)
+        nodes = {
+            node
+            for edge in edges
+            for node in (edge.get("source_node"), edge.get("target_node"))
+            if node
+        }
+        return len(nodes)
+
+    async def get_timeline(self, workspace_id: str, subject: str) -> list[dict]:
+        """Return a chronological edge chain for one subject."""
+        assert self._graph_db is not None
+        sql = (
+            "SELECT id, source_node, relation, target_node, confidence, "
+            "workspace_id, source_ref, valid_from, valid_to, superseded_by, "
+            "first_seen, last_seen "
+            "FROM knowledge_graph WHERE workspace_id = ? AND source_node = ? "
+            "ORDER BY COALESCE(valid_from, first_seen, last_seen, '')"
+        )
+        async with self._graph_db.execute(sql, (workspace_id, subject)) as cursor:
+            rows = await cursor.fetchall()
+        return [
+            {
+                "edge_id": row[0],
+                "subject": row[1],
+                "relation": row[2],
+                "target": row[3],
+                "confidence": row[4],
+                "workspace_id": row[5],
+                "source_ref": row[6],
+                "valid_from": row[7] or row[10] or row[11],
+                "valid_to": row[8],
+                "superseded_by": row[9],
+            }
+            for row in rows
         ]
 
     @staticmethod
@@ -714,39 +820,73 @@ class SemanticStore:
         category, and confidence attributes.
         """
         G = nx.Graph()
+        select = (
+            "SELECT source_node, relation, target_node, weight, category, "
+            "confidence, workspace_id, target_workspace_id, source_ref, "
+            "importance_score, never_decay, id FROM knowledge_graph "
+        )
         if workspace_id is None:
-            sql = (
-                "SELECT source_node, relation, target_node, weight, category, "
-                "confidence FROM knowledge_graph"
-            )
+            sql = select
             args: tuple = ()
         elif include_cross_refs:
             sql = (
-                "SELECT source_node, relation, target_node, weight, category, "
-                "confidence FROM knowledge_graph "
+                select
+                +
                 "WHERE workspace_id = ? OR target_workspace_id = ?"
             )
             args = (workspace_id, workspace_id)
         else:
             sql = (
-                "SELECT source_node, relation, target_node, weight, category, "
-                "confidence FROM knowledge_graph WHERE workspace_id = ?"
+                select
+                + "WHERE workspace_id = ? "
+                "AND (target_workspace_id IS NULL OR target_workspace_id = ?)"
             )
-            args = (workspace_id,)
+            args = (workspace_id, workspace_id)
         async with self._graph_db.execute(sql, args) as cursor:
             rows = await cursor.fetchall()
-        for source, relation, target, weight, category, confidence in rows:
+        for (
+            source,
+            relation,
+            target,
+            weight,
+            category,
+            confidence,
+            row_workspace_id,
+            target_workspace_id,
+            source_ref,
+            importance_score,
+            never_decay,
+            edge_id,
+        ) in rows:
             if source not in G:
-                G.add_node(source, label=source)
+                G.add_node(source, label=source, workspace_id=row_workspace_id)
             if target not in G:
-                G.add_node(target, label=target)
+                G.add_node(
+                    target,
+                    label=target,
+                    workspace_id=target_workspace_id or row_workspace_id,
+                )
+            for node_id in (source, target):
+                node = G.nodes[node_id]
+                node["source_ref"] = node.get("source_ref") or source_ref
+                node["importance_score"] = max(
+                    float(node.get("importance_score", 0.0) or 0.0),
+                    float(importance_score or 0.0),
+                )
+                node["never_decay"] = bool(node.get("never_decay")) or bool(never_decay)
             G.add_edge(
                 source,
                 target,
+                id=edge_id,
                 relation=relation,
                 weight=weight,
                 category=category,
                 confidence=confidence,
+                workspace_id=row_workspace_id,
+                target_workspace_id=target_workspace_id,
+                source_ref=source_ref,
+                importance_score=importance_score,
+                never_decay=bool(never_decay),
             )
         return G
 
@@ -949,10 +1089,80 @@ class SemanticStore:
         await self._graph_db.commit()
         return cursor.rowcount or 0
 
-    async def mark_superseded(self, edge_id: str, valid_to: str) -> None:
+    async def mark_superseded(
+        self,
+        edge_id: str,
+        valid_to: str | None = None,
+        superseded_by: str | None = None,
+    ) -> None:
         """Mark a knowledge graph edge as no longer current."""
-        await self._graph_db.execute(
-            "UPDATE knowledge_graph SET valid_to = ? WHERE id = ?",
-            (valid_to, edge_id),
-        )
+        valid_to = valid_to or _now()
+        if superseded_by is None:
+            await self._graph_db.execute(
+                "UPDATE knowledge_graph SET valid_to = ? WHERE id = ?",
+                (valid_to, edge_id),
+            )
+        else:
+            await self._graph_db.execute(
+                "UPDATE knowledge_graph SET valid_to = ?, superseded_by = ? "
+                "WHERE id = ?",
+                (valid_to, superseded_by, edge_id),
+            )
         await self._graph_db.commit()
+
+    async def _find_edge(
+        self,
+        workspace_id: str,
+        source_node: str,
+        relation: str,
+        target_node: str,
+        origin: str,
+    ) -> dict | None:
+        assert self._graph_db is not None
+        self._graph_db.row_factory = aiosqlite.Row
+        async with self._graph_db.execute(
+            """
+            SELECT id, source_node, relation, target_node, weight, category,
+                   occurrence_count, origin, confidence, workspace_id,
+                   target_workspace_id, source_ref, valid_from, valid_to,
+                   superseded_by, epistemic_source, importance_score, never_decay,
+                   first_seen, last_seen
+            FROM knowledge_graph
+            WHERE workspace_id = ? AND source_node = ? AND relation = ?
+              AND target_node = ? AND origin = ?
+            """,
+            (workspace_id, source_node, relation, target_node, origin),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    @staticmethod
+    def _edge_for_api(edge: dict) -> dict:
+        return {
+            "id": edge.get("id"),
+            "subject": edge.get("source_node"),
+            "source": edge.get("source_node"),
+            "source_node": edge.get("source_node"),
+            "relation": edge.get("relation"),
+            "target": edge.get("target_node"),
+            "target_node": edge.get("target_node"),
+            "weight": edge.get("weight"),
+            "category": edge.get("category"),
+            "occurrence_count": edge.get("occurrence_count"),
+            "origin": edge.get("origin"),
+            "confidence": edge.get("confidence"),
+            "workspace_id": edge.get("workspace_id"),
+            "target_workspace_id": edge.get("target_workspace_id"),
+            "source_ref": edge.get("source_ref"),
+            "source_id": edge.get("source_ref"),
+            "valid_from": edge.get("valid_from") or edge.get("first_seen"),
+            "valid_to": edge.get("valid_to"),
+            "superseded_by": edge.get("superseded_by"),
+            "epistemic_source": edge.get("epistemic_source"),
+            "importance_score": edge.get("importance_score"),
+            "never_decay": bool(edge.get("never_decay")),
+        }
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()

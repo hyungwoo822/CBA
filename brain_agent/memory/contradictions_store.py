@@ -155,7 +155,7 @@ class ContradictionsStore:
         resolution: str,
         resolved_by: str = "user",
         resolution_confidence: str = "EXTRACTED",
-    ) -> None:
+    ) -> dict:
         """Mark a contradiction resolved with the selected resolution."""
         assert self._db is not None
         existing = await self._get_by_id(contradiction_id)
@@ -174,8 +174,11 @@ class ContradictionsStore:
             (resolution, resolved_by, resolution_confidence, _now(), contradiction_id),
         )
         await self._db.commit()
+        resolved = await self._get_by_id(contradiction_id)
+        assert resolved is not None
+        return resolved
 
-    async def dismiss(self, contradiction_id: str) -> None:
+    async def dismiss(self, contradiction_id: str) -> dict:
         """Dismiss a contradiction without choosing a resolution."""
         assert self._db is not None
         existing = await self._get_by_id(contradiction_id)
@@ -187,6 +190,13 @@ class ContradictionsStore:
             (_now(), contradiction_id),
         )
         await self._db.commit()
+        dismissed = await self._get_by_id(contradiction_id)
+        assert dismissed is not None
+        return dismissed
+
+    async def get_contradiction(self, contradiction_id: str) -> dict | None:
+        """Return a contradiction by id."""
+        return await self._get_by_id(contradiction_id)
 
     async def list_open(self, workspace_id: str) -> list[dict]:
         """Return open contradictions for a workspace."""

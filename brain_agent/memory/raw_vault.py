@@ -184,6 +184,10 @@ class RawVault:
             row = await cur.fetchone()
         return dict(row) if row else None
 
+    async def get(self, source_id: str) -> dict | None:
+        """Compatibility alias for dashboard routers and tests."""
+        return await self.get_source(source_id)
+
     async def list_sources(self, workspace_id: str | None = "personal") -> list[dict]:
         assert self._db is not None
         self._db.row_factory = aiosqlite.Row
@@ -231,6 +235,19 @@ class RawVault:
                 )
                 return None
         return None
+
+    async def read_bytes(self, source_id: str) -> bytes | None:
+        """Compatibility alias for dashboard routers and tests."""
+        return await self.get_raw_bytes(source_id)
+
+    async def mark_integrity_invalid(self, source_id: str) -> None:
+        """Mark a source as failing integrity verification."""
+        assert self._db is not None
+        await self._db.execute(
+            "UPDATE sources SET integrity_valid = 0, last_verified = ? WHERE id = ?",
+            (_now(), source_id),
+        )
+        await self._db.commit()
 
     async def verify_integrity(self, source_id: str) -> bool:
         """Re-hash stored bytes, update integrity_valid, and return validity."""

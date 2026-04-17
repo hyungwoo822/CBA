@@ -217,6 +217,26 @@ def create_app(static_dir: str | None = None, agent: "BrainAgent | None" = None)
         allow_headers=["*"],
     )
 
+    from brain_agent.dashboard.routers import (
+        curation as curation_router,
+        export as export_router,
+        kg as kg_router,
+        llm as llm_router,
+        ontology as ontology_router,
+        sources as sources_router,
+        timeline as timeline_router,
+        workspaces as workspaces_router,
+    )
+
+    app.include_router(workspaces_router.build_router(_state))
+    app.include_router(kg_router.build_router(_state))
+    app.include_router(ontology_router.build_router(_state))
+    app.include_router(curation_router.build_router(_state))
+    app.include_router(sources_router.build_router(_state))
+    app.include_router(timeline_router.build_router(_state))
+    app.include_router(export_router.build_router(_state))
+    app.include_router(llm_router.build_router(_state))
+
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket):
         await event_bus.connect(websocket)
@@ -522,52 +542,6 @@ def create_app(static_dir: str | None = None, agent: "BrainAgent | None" = None)
         except Exception:
             pass
         return {"documents": documents}
-
-    @app.get("/api/memory/knowledge-graph")
-    async def get_knowledge_graph():
-        """Return knowledge graph structure for visualization."""
-        agent_inst = _state["agent"]
-        if not agent_inst or not agent_inst.memory:
-            return {"nodes": [], "edges": [], "communities": {}, "hubs": []}
-        try:
-            G = await agent_inst.memory.semantic.export_as_networkx()
-            from brain_agent.memory.graph_analysis import (
-                cluster_graph, cohesion_scores, hub_concepts,
-            )
-            comms = cluster_graph(G)
-            scores = cohesion_scores(G, comms)
-            hubs = hub_concepts(G, top_n=10)
-            nodes = [
-                {
-                    "id": n,
-                    "label": G.nodes[n].get("label", n),
-                    "community": next(
-                        (cid for cid, members in comms.items() if n in members), -1
-                    ),
-                }
-                for n in G.nodes()
-            ]
-            edges = [
-                {
-                    "source": u,
-                    "target": v,
-                    "relation": d.get("relation", ""),
-                    "confidence": d.get("confidence", "INFERRED"),
-                    "weight": d.get("weight", 0.5),
-                }
-                for u, v, d in G.edges(data=True)
-            ]
-            return {
-                "nodes": nodes,
-                "edges": edges,
-                "communities": {
-                    str(cid): {"members": members, "cohesion": scores.get(cid, 0.0)}
-                    for cid, members in comms.items()
-                },
-                "hubs": hubs,
-            }
-        except Exception:
-            return {"nodes": [], "edges": [], "communities": {}, "hubs": []}
 
     @app.get("/api/memory/hyperedges")
     async def get_hyperedges():

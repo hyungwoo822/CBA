@@ -573,13 +573,28 @@ class OntologyStore:
             updated = await cur.fetchone()
         return dict(updated)
 
-    async def reject_proposal(self, proposal_id: str) -> None:
+    async def reject_proposal(self, proposal_id: str) -> dict:
         assert self._db is not None
+        self._db.row_factory = aiosqlite.Row
+        async with self._db.execute(
+            "SELECT * FROM pending_ontology_proposals WHERE id = ?",
+            (proposal_id,),
+        ) as cur:
+            existing = await cur.fetchone()
+        if existing is None:
+            raise ValueError(f"Proposal not found: {proposal_id}")
         await self._db.execute(
             "UPDATE pending_ontology_proposals SET status = 'rejected' WHERE id = ?",
             (proposal_id,),
         )
         await self._db.commit()
+        async with self._db.execute(
+            "SELECT * FROM pending_ontology_proposals WHERE id = ?",
+            (proposal_id,),
+        ) as cur:
+            updated = await cur.fetchone()
+        assert updated is not None
+        return dict(updated)
 
     async def list_pending(self, workspace_id: str) -> list[dict]:
         assert self._db is not None

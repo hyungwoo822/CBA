@@ -32,6 +32,60 @@ export interface Particle {
   delay: number
 }
 
+export interface Workspace {
+  id: string
+  name: string
+  description?: string
+  decay_policy: 'none' | 'slow' | 'normal'
+  node_count?: number
+  edge_count?: number
+  pending_count?: number
+  blocking_count?: number
+}
+
+export interface OpenQuestion {
+  id: string
+  question_id?: string
+  question: string
+  severity: 'minor' | 'moderate' | 'severe'
+  workspace_id: string
+  context_input?: string
+  raised_by?: string
+}
+
+export interface Contradiction {
+  id: string
+  contradiction_id?: string
+  subject?: string
+  subject_node?: string
+  value_a: string
+  value_b: string
+  severity: 'minor' | 'moderate' | 'severe'
+  workspace_id: string
+  source_a?: string
+  source_b?: string
+  epistemic_source_a?: string
+  epistemic_source_b?: string
+}
+
+export interface OntologyProposal {
+  id: string
+  proposal_id?: string
+  kind: 'node_type' | 'relation_type'
+  proposed_name: string
+  confidence: string
+  workspace_id: string
+  source_snippet?: string
+  definition?: string
+}
+
+export interface ModelInfo {
+  id: string
+  vendor: string
+  available: boolean
+  reason?: string
+}
+
 interface BrainState {
   regions: Record<string, RegionState>
   networkMode: string
@@ -43,6 +97,8 @@ interface BrainState {
   particles: Particle[]
   lastResponse: string | null
   responseTimestamp: number
+  lastResponseMode: 'normal' | 'append' | 'block'
+  lastBlockQuestion: OpenQuestion | null
   isAudioMode: boolean
   audioState: 'idle' | 'listening' | 'processing' | 'done'
   selectedRegion: string | null
@@ -57,6 +113,13 @@ interface BrainState {
   interactionMode: 'question' | 'expression'
   setInteractionMode: (mode: 'question' | 'expression') => void
   profileModalOpen: boolean
+  currentWorkspace: Workspace | null
+  workspaces: Workspace[]
+  openQuestions: OpenQuestion[]
+  contradictions: Contradiction[]
+  ontologyProposals: OntologyProposal[]
+  defaultModel: string
+  availableModels: ModelInfo[]
 
   setRegionScreenPositions: (positions: Record<string, { x: number; y: number }>) => void
   setRegionActivation: (region: string, level: number, mode: string) => void
@@ -68,6 +131,7 @@ interface BrainState {
   addSignalFlow: (flow: Omit<SignalFlowEvent, 'id' | 'timestamp'>) => void
   setParticles: (particles: Particle[]) => void
   setLastResponse: (response: string) => void
+  setLastResponseBlock: (mode: 'normal' | 'append' | 'block', q?: OpenQuestion) => void
   setAudioMode: (active: boolean) => void
   setAudioState: (state: BrainState['audioState']) => void
   setSelectedRegion: (region: string | null) => void
@@ -83,6 +147,18 @@ interface BrainState {
   setDragOver: (v: boolean) => void
   setChatLoading: (v: boolean) => void
   setProfileModalOpen: (v: boolean) => void
+  setCurrentWorkspace: (ws: Workspace | null) => void
+  setWorkspaces: (list: Workspace[]) => void
+  refreshWorkspaces: () => Promise<void>
+  removeOpenQuestion: (id: string) => void
+  removeContradiction: (id: string) => void
+  removeOntologyProposal: (id: string) => void
+  addOpenQuestion: (q: OpenQuestion) => void
+  addContradiction: (c: Contradiction) => void
+  addOntologyProposal: (p: OntologyProposal) => void
+  refreshCuration: (ws_id: string) => Promise<void>
+  setModelInventory: (defaultModel: string, models: ModelInfo[]) => void
+  refreshModelInventory: () => Promise<void>
   loadChatHistory: () => Promise<void>
   submitChat: () => Promise<void>
   submitAudio: (audioBlob: Blob) => Promise<void>
@@ -121,6 +197,8 @@ export const useBrainStore = create<BrainState>((set) => ({
   particles: [],
   lastResponse: null,
   responseTimestamp: 0,
+  lastResponseMode: 'normal',
+  lastBlockQuestion: null,
   isAudioMode: false,
   audioState: 'idle' as const,
   selectedRegion: null,
@@ -135,6 +213,13 @@ export const useBrainStore = create<BrainState>((set) => ({
   interactionMode: 'question',
   setInteractionMode: (mode) => set({ interactionMode: mode }),
   profileModalOpen: false,
+  currentWorkspace: null,
+  workspaces: [],
+  openQuestions: [],
+  contradictions: [],
+  ontologyProposals: [],
+  defaultModel: '',
+  availableModels: [],
 
   setRegionActivation: (region, level, mode) =>
     set((s) => ({ regions: { ...s.regions, [region]: { level, mode } } })),
@@ -189,7 +274,8 @@ export const useBrainStore = create<BrainState>((set) => ({
     }
   }),
   setParticles: (particles) => set({ particles }),
-  setLastResponse: (response) => set({ lastResponse: response, responseTimestamp: Date.now() }),
+  setLastResponse: (response) => set({ lastResponse: response, responseTimestamp: Date.now(), lastResponseMode: 'normal', lastBlockQuestion: null }),
+  setLastResponseBlock: (mode, q) => set({ lastResponseMode: mode, lastBlockQuestion: q || null, responseTimestamp: Date.now() }),
   setAudioMode: (active) => set({ isAudioMode: active }),
   setAudioState: (audioState) => set({ audioState }),
   setSelectedRegion: (region) => set({ selectedRegion: region }),
@@ -231,6 +317,64 @@ export const useBrainStore = create<BrainState>((set) => ({
   setDragOver: (v) => set({ isDragOver: v }),
   setChatLoading: (v) => set({ chatLoading: v }),
   setProfileModalOpen: (v) => set({ profileModalOpen: v }),
+  setCurrentWorkspace: (ws) => set({ currentWorkspace: ws }),
+  setWorkspaces: (list) => set({ workspaces: list }),
+  refreshWorkspaces: async () => {
+    try {
+      const listResponse = await fetch('/api/workspaces')
+      const listData = await listResponse.json()
+      const workspaces = listData.workspaces || []
+      const currentResponse = await fetch('/api/workspaces/current?session_id=default')
+      const currentData = await currentResponse.json()
+      set({
+        workspaces,
+        currentWorkspace: currentData.workspace || workspaces[0] || null,
+      })
+    } catch {}
+  },
+  addOpenQuestion: (q) => set((s) => {
+    const id = q.id || q.question_id
+    if (!id || s.openQuestions.some((item) => item.id === id || item.question_id === id)) return {}
+    return { openQuestions: [...s.openQuestions, { ...q, id }] }
+  }),
+  addContradiction: (c) => set((s) => {
+    const id = c.id || c.contradiction_id
+    if (!id || s.contradictions.some((item) => item.id === id || item.contradiction_id === id)) return {}
+    return { contradictions: [...s.contradictions, { ...c, id }] }
+  }),
+  addOntologyProposal: (p) => set((s) => {
+    const id = p.id || p.proposal_id
+    if (!id || s.ontologyProposals.some((item) => item.id === id || item.proposal_id === id)) return {}
+    return { ontologyProposals: [...s.ontologyProposals, { ...p, id }] }
+  }),
+  removeOpenQuestion: (id) => set((s) => ({ openQuestions: s.openQuestions.filter((q) => q.id !== id && q.question_id !== id) })),
+  removeContradiction: (id) => set((s) => ({ contradictions: s.contradictions.filter((c) => c.id !== id && c.contradiction_id !== id) })),
+  removeOntologyProposal: (id) => set((s) => ({ ontologyProposals: s.ontologyProposals.filter((p) => p.id !== id && p.proposal_id !== id) })),
+  refreshCuration: async (ws_id) => {
+    try {
+      const [questions, contradictions, proposals] = await Promise.all([
+        fetch(`/api/questions/${ws_id}`).then((r) => r.json()),
+        fetch(`/api/contradictions/${ws_id}`).then((r) => r.json()),
+        fetch(`/api/ontology/${ws_id}/proposals`).then((r) => r.json()),
+      ])
+      set({
+        openQuestions: questions.questions || [],
+        contradictions: contradictions.contradictions || [],
+        ontologyProposals: proposals.proposals || [],
+      })
+    } catch {}
+  },
+  setModelInventory: (defaultModel, models) => set({ defaultModel, availableModels: models }),
+  refreshModelInventory: async () => {
+    try {
+      const response = await fetch('/api/llm/providers')
+      const data = await response.json()
+      set({
+        defaultModel: data.default_model || '',
+        availableModels: data.available || [],
+      })
+    } catch {}
+  },
   loadChatHistory: async () => {
     try {
         const res = await fetch('/api/chat/history')

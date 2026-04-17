@@ -1,5 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { useBrainStore } from '../stores/brainState'
+import { useCurationInbox } from '../hooks/useCurationInbox'
+import { QuestionCard } from './QuestionCard'
 
 // Persist position across responses
 let savedPos: { x: number; y: number } | null = null
@@ -7,6 +9,9 @@ let savedPos: { x: number; y: number } | null = null
 export function BrainResponseBubble() {
   const lastResponse = useBrainStore((s) => s.lastResponse)
   const responseTimestamp = useBrainStore((s) => s.responseTimestamp)
+  const lastResponseMode = useBrainStore((s) => s.lastResponseMode)
+  const lastBlockQuestion = useBrainStore((s) => s.lastBlockQuestion)
+  const { answerQuestion } = useCurationInbox()
   const [visible, setVisible] = useState(false)
   const [fading, setFading] = useState(false)
   const [pos, setPos] = useState(savedPos || { x: window.innerWidth * 0.22, y: window.innerHeight * 0.15 })
@@ -15,7 +20,7 @@ export function BrainResponseBubble() {
   const posStart = useRef({ x: 0, y: 0 })
 
   useEffect(() => {
-    if (!lastResponse) return
+    if (!lastResponse && !lastBlockQuestion) return
     setVisible(true)
     setFading(false)
     // Use saved position if available
@@ -28,7 +33,7 @@ export function BrainResponseBubble() {
       clearTimeout(fadeTimer)
       clearTimeout(hideTimer)
     }
-  }, [lastResponse, responseTimestamp])
+  }, [lastResponse, lastBlockQuestion, responseTimestamp])
 
   const onMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -57,7 +62,7 @@ export function BrainResponseBubble() {
     window.addEventListener('mouseup', onMouseUp)
   }, [pos])
 
-  if (!visible || !lastResponse) return null
+  if (!visible || (!lastResponse && !lastBlockQuestion)) return null
 
   return (
     <div
@@ -75,7 +80,11 @@ export function BrainResponseBubble() {
         <div className="br-dot" />
         <span className="br-label">Brain</span>
       </div>
-      <div className="br-text">{lastResponse}</div>
+      {lastResponseMode === 'block' && lastBlockQuestion ? (
+        <QuestionCard q={lastBlockQuestion} onAnswer={answerQuestion} />
+      ) : (
+        <div className="br-text">{lastResponse}</div>
+      )}
     </div>
   )
 }

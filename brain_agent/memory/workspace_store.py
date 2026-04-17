@@ -155,8 +155,14 @@ class WorkspaceStore:
         assert personal is not None
         return personal
 
-    async def set_session_workspace(self, session_id: str, workspace_id: str) -> None:
-        if await self.get_workspace(workspace_id) is None:
+    async def set_session_workspace(
+        self,
+        session_id: str,
+        workspace_id: str,
+        emitter=None,
+    ) -> None:
+        workspace = await self.get_workspace(workspace_id)
+        if workspace is None:
             raise ValueError(f"Workspace not found: {workspace_id}")
         assert self._db is not None
         now = _now()
@@ -171,6 +177,12 @@ class WorkspaceStore:
             (session_id, workspace_id, now),
         )
         await self._db.commit()
+        if emitter is not None:
+            await emitter.workspace_changed(
+                workspace_id=workspace["id"],
+                workspace_name=workspace["name"],
+                session_id=session_id,
+            )
 
     async def get_session_workspace(self, session_id: str) -> str:
         """Return the bound workspace id, or personal if the session is unbound."""

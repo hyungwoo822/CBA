@@ -17,6 +17,9 @@ interface KGNode {
   label: string
   community: number
   val?: number
+  source_ref?: string
+  importance_score?: number
+  never_decay?: boolean
 }
 
 interface KGLink {
@@ -25,6 +28,10 @@ interface KGLink {
   relation: string
   confidence: string
   weight: number
+  cross_ref?: boolean
+  source_ref?: string
+  importance_score?: number
+  never_decay?: boolean
 }
 
 interface KGData {
@@ -34,17 +41,39 @@ interface KGData {
   hubs: { id: string; label: string; edges: number }[]
 }
 
-export default function KnowledgeGraphPanel({ width, height }: { width: number; height: number }) {
+interface KnowledgeGraphPanelProps {
+  width: number
+  height: number
+  workspaceId?: string
+  includeCrossRefs?: boolean
+  importanceOverlay?: boolean
+  neverDecayHighlight?: boolean
+  onNodeHoverSourceRef?: (sourceRef: string | null) => void
+}
+
+export default function KnowledgeGraphPanel({
+  width,
+  height,
+  workspaceId,
+  includeCrossRefs,
+  importanceOverlay,
+  neverDecayHighlight,
+  onNodeHoverSourceRef,
+}: KnowledgeGraphPanelProps) {
   const [data, setData] = useState<KGData | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
   const graphRef = useRef<any>(null)
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch('/api/memory/knowledge-graph')
+      const params = new URLSearchParams()
+      if (workspaceId) params.set('workspace_id', workspaceId)
+      if (includeCrossRefs) params.set('include_cross_refs', 'true')
+      const query = params.toString()
+      const res = await fetch(`/api/memory/knowledge-graph${query ? `?${query}` : ''}`)
       if (res.ok) setData(await res.json())
     } catch {}
-  }, [])
+  }, [workspaceId, includeCrossRefs])
 
   useEffect(() => {
     fetchData()
@@ -55,10 +84,24 @@ export default function KnowledgeGraphPanel({ width, height }: { width: number; 
   const graphData = useMemo(() => {
     if (!data || !data.nodes.length) return { nodes: [], links: [] }
     const hubIds = new Set((data.hubs || []).map(h => h.id))
+    const edgeImportance = new Map<string, number>()
+    const edgeNeverDecay = new Set<string>()
+    const edgeSourceRef = new Map<string, string>()
+    for (const edge of data.edges) {
+      const importance = edge.importance_score || 0
+      for (const nodeId of [edge.source, edge.target]) {
+        edgeImportance.set(nodeId, Math.max(edgeImportance.get(nodeId) || 0, importance))
+        if (edge.never_decay) edgeNeverDecay.add(nodeId)
+        if (edge.source_ref && !edgeSourceRef.has(nodeId)) edgeSourceRef.set(nodeId, edge.source_ref)
+      }
+    }
     const nodes = data.nodes.map(n => ({
       ...n,
       val: hubIds.has(n.id) ? 4.0 : 1.5,
       color: COMMUNITY_COLORS[n.community % COMMUNITY_COLORS.length] || '#94a3b8',
+      importance_score: n.importance_score ?? edgeImportance.get(n.id) ?? 0,
+      never_decay: n.never_decay ?? edgeNeverDecay.has(n.id),
+      source_ref: n.source_ref || edgeSourceRef.get(n.id),
     }))
     const links = data.edges.map(e => ({
       source: e.source,
@@ -66,6 +109,10 @@ export default function KnowledgeGraphPanel({ width, height }: { width: number; 
       relation: e.relation,
       confidence: e.confidence,
       weight: e.weight,
+      cross_ref: e.cross_ref,
+      source_ref: e.source_ref,
+      importance_score: e.importance_score,
+      never_decay: e.never_decay,
     }))
     return { nodes, links }
   }, [data])
@@ -100,11 +147,24 @@ export default function KnowledgeGraphPanel({ width, height }: { width: number; 
           height={(height || 300) - 25}
           graphData={graphData}
           nodeRelSize={3.5}
-          nodeColor={(node: any) => node.color || '#94a3b8'}
+          nodeColor={(node: any) => {
+            if (!importanceOverlay) return node.color || '#94a3b8'
+            const importance = Math.max(0, Math.min(1, Number(node.importance_score || 0)))
+            const red = Math.round(100 + importance * 155)
+            const green = Math.round(130 - importance * 70)
+            return `rgb(${red},${green},80)`
+          }}
           nodeLabel={(node: any) => `${node.label} (community ${node.community})`}
           nodeCanvasObjectMode={() => 'after'}
           nodeCanvasObject={(node: any, ctx: CanvasRenderingContext2D) => {
             const isHub = node.val > 3
+            if (neverDecayHighlight && node.never_decay) {
+              ctx.beginPath()
+              ctx.arc(node.x, node.y, (node.val || 1) * 3.5 + 2, 0, Math.PI * 2)
+              ctx.strokeStyle = '#facc15'
+              ctx.lineWidth = 1.5
+              ctx.stroke()
+            }
             ctx.font = `${isHub ? 'bold 8' : '6.5'}px Inter, sans-serif`
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
@@ -112,15 +172,20 @@ export default function KnowledgeGraphPanel({ width, height }: { width: number; 
             ctx.fillText(node.label || node.id, node.x, node.y + (node.val || 1) * 3.5 + 3)
           }}
           linkColor={(link: any) => {
+            if (link.cross_ref) return '#f59e0b'
             const base = '#94a3b8'
             const opacity = CONFIDENCE_OPACITY[link.confidence] || '60'
             return base + opacity
           }}
+          linkLineDash={(link: any) => link.cross_ref ? [2, 2] : null}
           linkWidth={(link: any) => 0.3 + (link.weight || 0.5) * 1.2}
           linkDirectionalArrowLength={2.5}
           linkDirectionalArrowRelPos={1}
           linkLabel={(link: any) => `${link.relation} [${link.confidence}] (${(link.weight || 0).toFixed(2)})`}
-          onNodeHover={(node: any) => setHovered(node?.id || null)}
+          onNodeHover={(node: any) => {
+            setHovered(node?.id || null)
+            onNodeHoverSourceRef?.(node?.source_ref || null)
+          }}
           backgroundColor="transparent"
           cooldownTicks={80}
           d3AlphaDecay={0.04}

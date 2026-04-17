@@ -108,7 +108,7 @@ class OpenQuestionsStore:
         question_id: str,
         answer: str,
         answer_source: str = "",
-    ) -> None:
+    ) -> dict:
         """Answer a question and remove it from unanswered/blocking queries."""
         assert self._db is not None
         existing = await self._get_by_id(question_id)
@@ -123,6 +123,13 @@ class OpenQuestionsStore:
             (answer, answer_source, _now(), question_id),
         )
         await self._db.commit()
+        answered = await self._get_by_id(question_id)
+        assert answered is not None
+        return answered
+
+    async def get_question(self, question_id: str) -> dict | None:
+        """Return a question by id."""
+        return await self._get_by_id(question_id)
 
     async def list_unanswered(self, workspace_id: str) -> list[dict]:
         """Return unanswered questions for a workspace."""

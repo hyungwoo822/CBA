@@ -140,6 +140,7 @@ class ProcessingPipeline:
             memory=memory,
             llm_provider=llm_provider,
             config=extraction_config or ExtractionConfig(),
+            emitter=emitter,
         )
         self.neuromodulators = Neuromodulators()
         self.network_ctrl = TripleNetworkController()
@@ -845,6 +846,7 @@ class ProcessingPipeline:
         session_id = getattr(self, "_session_id", "") or ""
         extraction_result = None
         try:
+            self.extraction_orchestrator._emitter = self._emitter
             extraction_result = await self.extraction_orchestrator.extract(
                 text=text,
                 image=image,

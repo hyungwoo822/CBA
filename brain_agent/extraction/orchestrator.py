@@ -23,10 +23,12 @@ class ExtractionOrchestrator:
         memory,
         llm_provider: LLMProvider,
         config: ExtractionConfig | None = None,
+        emitter=None,
     ):
         self._memory = memory
         self._llm = llm_provider
         self._cfg = config or ExtractionConfig()
+        self._emitter = emitter
 
         self._triage = Triage(memory.workspace, llm_provider, self._cfg)
         self._extractor = Extractor(memory.ontology, llm_provider, self._cfg)
@@ -198,8 +200,9 @@ class ExtractionOrchestrator:
                 },
             )
 
+        new_contradictions = []
         for contradiction in validated.contradictions:
-            await self._memory.contradictions.detect(
+            created = await self._memory.contradictions.detect(
                 workspace_id=workspace_id,
                 subject=contradiction["subject"],
                 key_or_relation=contradiction["key"],
@@ -215,9 +218,12 @@ class ExtractionOrchestrator:
                     else None
                 ),
             )
+            if created:
+                new_contradictions.append(created)
 
+        new_open_questions = []
         for question in validated.open_questions:
-            await self._memory.open_questions.add_question(
+            created = await self._memory.open_questions.add_question(
                 workspace_id=workspace_id,
                 question=question["question"],
                 raised_by=_normalize_raised_by(question.get("raised_by", "")),
@@ -225,9 +231,20 @@ class ExtractionOrchestrator:
                 context_node=question.get("context_node", ""),
                 context_input=question.get("context_input", ""),
             )
+            if created:
+                new_open_questions.append(created)
 
+        new_proposals = []
         for proposal in extracted.new_type_proposals:
-            await self._persist_type_proposal(workspace_id, proposal)
+            created = await self._persist_type_proposal(workspace_id, proposal)
+            if created:
+                new_proposals.append(created)
+
+        await self._emit_curation_events(
+            questions=new_open_questions,
+            contradictions=new_contradictions,
+            proposals=new_proposals,
+        )
 
         if extracted.narrative_chunk:
             await _call_with_fallback(
@@ -271,7 +288,7 @@ class ExtractionOrchestrator:
                 },
             )
 
-    async def _persist_type_proposal(self, workspace_id: str, proposal: dict) -> None:
+    async def _persist_type_proposal(self, workspace_id: str, proposal: dict) -> dict | None:
         kind = proposal.get("kind", "node")
         confidence = proposal.get("confidence", "AMBIGUOUS")
         name = proposal["name"]
@@ -294,26 +311,62 @@ class ExtractionOrchestrator:
                     schema=definition.get("schema") if isinstance(definition, dict) else {},
                     source_snippet=proposal.get("source_snippet", ""),
                 )
-            return
+            return None
 
         if kind in {"relation", "relation_type"} and hasattr(
             self._memory.ontology,
             "propose_relation_type",
         ):
-            await self._memory.ontology.propose_relation_type(
+            return await self._memory.ontology.propose_relation_type(
                 workspace_id,
                 name,
                 definition=definition,
                 confidence=confidence,
                 source_input=proposal.get("source_snippet", ""),
             )
-        else:
-            await self._memory.ontology.propose_node_type(
-                workspace_id,
-                name,
-                definition=definition,
-                confidence=confidence,
-                source_input=proposal.get("source_snippet", ""),
+        return await self._memory.ontology.propose_node_type(
+            workspace_id,
+            name,
+            definition=definition,
+            confidence=confidence,
+            source_input=proposal.get("source_snippet", ""),
+        )
+
+    async def _emit_curation_events(
+        self,
+        questions: list[dict],
+        contradictions: list[dict],
+        proposals: list[dict],
+    ) -> None:
+        if self._emitter is None:
+            return
+        for question in questions:
+            await self._emitter.clarification_requested(
+                question_id=question["id"],
+                question=question["question"],
+                severity=question["severity"],
+                workspace_id=question["workspace_id"],
+                context_input=question.get("context_input", ""),
+                raised_by=question.get("raised_by", "pipeline"),
+            )
+        for contradiction in contradictions:
+            await self._emitter.contradiction_detected(
+                contradiction_id=contradiction["id"],
+                subject=contradiction["subject_node"],
+                value_a=contradiction["value_a"],
+                value_b=contradiction["value_b"],
+                severity=contradiction["severity"],
+                workspace_id=contradiction["workspace_id"],
+                key_or_relation=contradiction.get("key_or_relation", ""),
+            )
+        for proposal in proposals:
+            await self._emitter.ontology_proposal(
+                proposal_id=proposal["id"],
+                kind=proposal["kind"],
+                proposed_name=proposal["proposed_name"],
+                confidence=proposal["confidence"],
+                workspace_id=proposal["workspace_id"],
+                source_snippet=proposal.get("source_input", ""),
             )
 
 

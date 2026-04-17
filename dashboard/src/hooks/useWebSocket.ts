@@ -38,6 +38,7 @@ async function fetchInitialState() {
       }
     }
   } catch { /* ignore */ }
+  await useBrainStore.getState().refreshWorkspaces()
 }
 
 export function useWebSocket(url: string) {
@@ -122,6 +123,50 @@ export function useWebSocket(url: string) {
           }
           break
         }
+        case 'workspace_changed': {
+          const payload = data.payload
+          const state = useBrainStore.getState()
+          const next = state.workspaces.find((workspace) => workspace.id === payload.workspace_id)
+          if (next) state.setCurrentWorkspace(next)
+          else state.refreshWorkspaces()
+          break
+        }
+        case 'clarification_requested': {
+          const payload = data.payload
+          const state = useBrainStore.getState()
+          const questionText = typeof payload.question === 'string'
+            ? payload.question
+            : Array.isArray(payload.questions)
+              ? payload.questions[0]
+              : ''
+          const question = {
+            id: String(payload.id || payload.question_id || `ws-${data.ts || Date.now()}`),
+            question_id: payload.question_id,
+            question: questionText,
+            severity: (payload.severity || 'moderate') as 'minor' | 'moderate' | 'severe',
+            workspace_id: String(payload.workspace_id || 'personal'),
+            context_input: payload.context_input,
+            raised_by: payload.raised_by,
+          }
+          if (question.question) state.addOpenQuestion(question)
+          if (question.severity === 'severe') state.setLastResponseBlock('block', question)
+          break
+        }
+        case 'contradiction_detected':
+          useBrainStore.getState().addContradiction(data.payload as any)
+          break
+        case 'ontology_proposal':
+          useBrainStore.getState().addOntologyProposal(data.payload as any)
+          break
+        case 'question_answered':
+          useBrainStore.getState().removeOpenQuestion(String(data.payload.question_id || data.payload.id))
+          break
+        case 'contradiction_resolved':
+          useBrainStore.getState().removeContradiction(String(data.payload.contradiction_id || data.payload.id))
+          break
+        case 'proposal_decided':
+          useBrainStore.getState().removeOntologyProposal(String(data.payload.proposal_id || data.payload.id))
+          break
       }
     }
 

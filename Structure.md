@@ -77,6 +77,30 @@ Fast navigation index for this repo. Read this **before** exploring the codebase
 | File | Purpose |
 |---|---|
 | `test_extraction_config.py` | ExtractionConfig and WorkspaceConfig defaults + BrainAgentConfig wiring |
+| `test_extraction_config_models.py` | Phase 8 per-stage extraction model defaults and override tests |
+
+## `tests/extraction/` — Extraction Pipeline Tests
+
+| File | Purpose |
+|---|---|
+| `test_orchestrator_emits.py` | Phase 8 extraction orchestrator curation WebSocket emit hook test |
+
+## `tests/dashboard/` — Dashboard API and UI Integration Tests
+
+| File | Purpose |
+|---|---|
+| `test_server.py` | Dashboard app and EventBus baseline tests |
+| `test_emitter.py` | DashboardEmitter baseline signal-flow test |
+| `test_workspace_api.py` | Phase 8 workspace CRUD, current binding, stats, and delete safeguards |
+| `test_kg_workspace_filter.py` | Phase 8 knowledge-graph workspace filter and cross-reference edge tests |
+| `test_curation_ws_emit.py` | Phase 8 curation WebSocket event emitter tests |
+| `test_ontology_api.py` | Phase 8 ontology type/proposal curation API tests |
+| `test_curation_api.py` | Phase 8 question and contradiction curation API tests |
+| `test_source_api.py` | Phase 8 raw-vault source metadata/raw/text API tests |
+| `test_timeline_api.py` | Phase 8 temporal supersede-chain timeline API test |
+| `test_export_preview.py` | Phase 8 export preview shape and filter-matrix tests |
+| `test_llm_provider_listing.py` | Phase 8 LLM provider inventory endpoint tests |
+| `test_phase8_smoke.py` | Phase 8 end-to-end dashboard API smoke test |
 
 ## `tests/regions/` — Phase 5 Region Test Additions
 
@@ -143,7 +167,7 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 
 | File | Purpose |
 |---|---|
-| `workspace_store.py` | Multi-workspace registry + session binding |
+| `workspace_store.py` | Multi-workspace registry, session binding, and optional workspace_changed emit hook |
 | `ontology_store.py` | Node/relation type registry with 4-tier confidence + proposal queue |
 | `ontology_seed.py` | Universal ontology constants (7 node + 10 relation types) |
 | `personal_adapter.py` | Personal workspace adapter bridging `identity_facts` to Person workspace nodes |
@@ -172,7 +196,7 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 | `validator.py` | Stage 3 contradiction, missing-property, pattern-separation, and FOK validation |
 | `severity.py` | Stage 4 response-mode decision from contradictions and open questions |
 | `refiner.py` | Stage 5 personal-workspace response polishing |
-| `orchestrator.py` | Multi-stage extraction coordinator with raw vault, staging, contradictions, questions, and proposals |
+| `orchestrator.py` | Multi-stage extraction coordinator with raw vault, staging, contradictions, questions, proposals, and curation event emits |
 | `_mock_llm.py` | Recording LLM provider used by extraction tests |
 | `__init__.py` | Extraction package marker |
 
@@ -218,6 +242,21 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 |---|---|
 | `server.py` | FastAPI app + `/ws` WebSocket + REST endpoints (`/api/*`) |
 | `emitter.py` | Event emitter (region_activation, memory_event, knowledge_update, clarification_requested; Phase 8 adds workspace/curation events) |
+| `providers_inventory.py` | Phase 8 LiteLLM model inventory and env availability mapping for dashboard model selector |
+
+## `brain_agent/dashboard/routers/` — Phase 8 Dashboard Routers
+
+| File | Purpose |
+|---|---|
+| `__init__.py` | Dashboard router package marker |
+| `workspaces.py` | Workspace CRUD, current session binding, stats, and workspace_changed event endpoints |
+| `kg.py` | Workspace-aware knowledge-graph visualization endpoint with optional cross-reference edges |
+| `ontology.py` | Ontology type listing and proposal approve/reject curation endpoints |
+| `curation.py` | Open-question and contradiction list/answer/resolve/dismiss endpoints |
+| `sources.py` | Raw-vault source metadata, raw bytes, and extracted text endpoints |
+| `timeline.py` | Temporal supersede-chain timeline endpoint |
+| `export.py` | MCP-compatible export preview endpoint with confidence, importance, decay, and raw-vault filters |
+| `llm.py` | LLM provider inventory endpoint for the dashboard model selector |
 
 ## `brain_agent/cli/` — CLI
 
@@ -279,11 +318,15 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 
 | Path | Purpose |
 |---|---|
-| `package.json` / `vite.config.ts` / `tsconfig*.json` | Build config |
+| `package.json` / `vite.config.ts` / `vitest.config.ts` / `tsconfig*.json` | Build and test config |
 | `index.html` | Vite entry |
 | `src/main.tsx` / `App.tsx` / `App.css` / `index.css` | App root |
-| `src/stores/brainState.ts` | Zustand store (regions, neuromodulators, events, chat, workspace — Phase 8 extends) |
-| `src/hooks/useWebSocket.ts` | WS subscription |
+| `src/stores/brainState.ts` | Zustand store (regions, neuromodulators, events, chat, workspace/curation/model UI state) |
+| `src/hooks/useWebSocket.ts` | WS subscription including Phase 8 workspace and curation event handlers |
+| `src/hooks/useWorkspace.ts` | Phase 8 workspace list/current loading and switching hook |
+| `src/hooks/useCurationInbox.ts` | Phase 8 curation inbox data/actions hook for questions, contradictions, and proposals |
+| `src/test/setup.ts` | Vitest + Testing Library setup |
+| `src/__smoke__.test.ts` | Frontend test-runner smoke test |
 | `src/hooks/useDraggable.ts` | Modal dragging |
 | `src/constants/brainRegions.ts` | 3D coords + region metadata |
 | `src/utils/fresnelMaterial.ts` | Three.js shader |
@@ -294,17 +337,34 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 |---|---|
 | `BrainScene.tsx` / `BrainModel.tsx` / `RegionBubble.tsx` | 3D brain scene + region spheres |
 | `CurvedConnections.tsx` / `SignalParticles.tsx` | Neural connections + flowing particles |
-| `HUD.tsx` | Top overlay — network mode + NT bars |
+| `HUD.tsx` | Top overlay for network mode, NT bars, workspace, inbox, export, and model controls |
 | `MemoryPanel.tsx` / `MemoryFlowBar.tsx` | Memory layer counts + flow |
-| `KnowledgeGraphPanel.tsx` / `KnowledgeGraphModal.tsx` | Force-directed KG viz (Phase 8 adds workspace filter) |
+| `KnowledgeGraphPanel.tsx` / `KnowledgeGraphModal.tsx` | Force-directed KG viz with workspace filter, cross-refs, overlays, and raw-vault hover preview |
 | `EventLog.tsx` | WS event stream |
 | `ChatInput.tsx` / `BrainResponseBubble.tsx` | Conversation UI |
 | `InteractionModeToggle.tsx` | question/expression mode switch |
 | `ChannelToggle.tsx` | Discord/Telegram toggle |
 | `AudioOrb.tsx` | Voice input indicator |
 | `RegionDetailPanel.tsx` / `ProfileEditModal.tsx` | Region detail + identity edit modals |
+| `WorkspaceSelector.tsx` | Phase 8 HUD workspace dropdown and current workspace switcher |
+| `CurationInbox.tsx` | Phase 8 three-tab curation drawer for questions, contradictions, and proposals |
+| `QuestionCard.tsx` | Phase 8 open-question answer card |
+| `ContradictionCard.tsx` | Phase 8 contradiction resolution card |
+| `ProposalCard.tsx` | Phase 8 ontology proposal approve/reject card |
+| `RawVaultPanel.tsx` | Phase 8 raw-vault source metadata/text/image preview drawer |
+| `TimelineView.tsx` | Phase 8 temporal supersede-chain visualization component |
+| `ExportPreviewModal.tsx` | Phase 8 export JSON preview modal with filters, copy, download, and lazy Monaco viewer |
+| `ModelSelector.tsx` | Phase 8 per-stage extraction model selector drawer driven by `/api/llm/providers` |
 
-Planned additions (Phase 8): `WorkspaceSelector.tsx`, `CurationInbox.tsx`, `QuestionCard.tsx`, `ContradictionCard.tsx`, `ProposalCard.tsx`, `RawVaultPanel.tsx`, `TimelineView.tsx`, `ExportPreviewModal.tsx`, `ModelSelector.tsx`.
+### `dashboard/src/components/__tests__/` — Phase 8 Component Tests
+
+| File | Purpose |
+|---|---|
+| `WorkspaceSelector.test.tsx` | Workspace selector current display and PUT switch action tests |
+| `CurationInbox.test.tsx` | Curation inbox tab/count and question-answer action tests |
+| `DualChannelSync.test.tsx` | Inbox optimistic removal and WS-style question_answered sync tests |
+| `ExportPreviewModal.test.tsx` | Export preview fetch, filter refetch, and clipboard tests |
+| `ModelSelector.test.tsx` | Model selector API-driven dropdown and unavailable reason tests |
 
 ---
 

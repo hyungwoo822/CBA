@@ -15,6 +15,9 @@ import { ProfileEditModal } from './components/ProfileEditModal'
 import { ChannelToggle } from './components/ChannelToggle'
 import KnowledgeGraphModal from './components/KnowledgeGraphModal'
 import { InteractionModeToggle } from './components/InteractionModeToggle'
+import { CurationInbox } from './components/CurationInbox'
+import { ExportPreviewModal } from './components/ExportPreviewModal'
+import { ModelSelector } from './components/ModelSelector'
 import { useWebSocket } from './hooks/useWebSocket'
 import { resetAllPositions } from './hooks/useDraggable'
 import { useBrainStore } from './stores/brainState'
@@ -165,6 +168,20 @@ function App() {
   const isDragOver = useBrainStore((s) => s.isDragOver)
   const setDragOver = useBrainStore((s) => s.setDragOver)
   const dragCounter = useRef(0)
+  const [inboxOpen, setInboxOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [modelSelectorOpen, setModelSelectorOpen] = useState(false)
+
+  useEffect(() => {
+    ;(window as any).__setInboxOpen = setInboxOpen
+    ;(window as any).__setExportOpen = setExportOpen
+    ;(window as any).__setModelSelectorOpen = setModelSelectorOpen
+    return () => {
+      delete (window as any).__setInboxOpen
+      delete (window as any).__setExportOpen
+      delete (window as any).__setModelSelectorOpen
+    }
+  }, [])
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -253,6 +270,9 @@ function App() {
       <MemoryFlowBar />
       <ProfileEditModal />
       <KnowledgeGraphModal />
+      <CurationInbox open={inboxOpen} onClose={() => setInboxOpen(false)} />
+      <ExportPreviewModal open={exportOpen} onClose={() => setExportOpen(false)} />
+      <ModelSelector open={modelSelectorOpen} onClose={() => setModelSelectorOpen(false)} />
       <InteractionModeToggle />
     </div>
   )
