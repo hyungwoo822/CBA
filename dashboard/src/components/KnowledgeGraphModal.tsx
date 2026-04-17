@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useDraggable } from '../hooks/useDraggable'
 import { useBrainStore } from '../stores/brainState'
 import KnowledgeGraphPanel from './KnowledgeGraphPanel'
@@ -6,6 +6,12 @@ import { RawVaultPanel } from './RawVaultPanel'
 
 const MODAL_W = 520
 const MODAL_H = 420
+const PERSONAL_WORKSPACE_ID = 'personal'
+const PERSONAL_WORKSPACE_NAME = 'Personal Knowledge'
+
+function workspaceName(workspace: { id: string; name: string }) {
+  return workspace.id === PERSONAL_WORKSPACE_ID ? PERSONAL_WORKSPACE_NAME : workspace.name
+}
 
 export default function KnowledgeGraphModal() {
   const [open, setOpen] = useState(false)
@@ -23,6 +29,19 @@ export default function KnowledgeGraphModal() {
   )
   const effectiveWorkspace = scopedWorkspace === 'all' ? undefined : scopedWorkspace
   const workspaceOptions = workspaces.length ? workspaces : currentWorkspace ? [currentWorkspace] : []
+
+  useEffect(() => {
+    ;(window as any).__openKnowledgeGraph = (
+      value?: string | { workspaceId?: string },
+    ) => {
+      const workspaceId = typeof value === 'string' ? value : value?.workspaceId
+      if (workspaceId) setScopedWorkspace(workspaceId)
+      setOpen(true)
+    }
+    return () => {
+      delete (window as any).__openKnowledgeGraph
+    }
+  }, [])
 
   return (
     <>
@@ -131,7 +150,7 @@ export default function KnowledgeGraphModal() {
             >
               <option value="all">All workspaces</option>
               {workspaceOptions.map((workspace) => (
-                <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+                <option key={workspace.id} value={workspace.id}>{workspaceName(workspace)}</option>
               ))}
             </select>
             <label style={toolbarLabel}>

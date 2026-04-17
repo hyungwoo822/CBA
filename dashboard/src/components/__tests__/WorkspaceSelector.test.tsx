@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useBrainStore } from '../../stores/brainState'
 import { WorkspaceSelector } from '../WorkspaceSelector'
 
@@ -15,6 +15,10 @@ beforeEach(() => {
     ],
     currentWorkspace: { id: 'personal', name: 'Personal Knowledge', decay_policy: 'normal' },
   })
+})
+
+afterEach(() => {
+  delete (window as any).__openKnowledgeGraph
 })
 
 describe('WorkspaceSelector', () => {
@@ -65,5 +69,14 @@ describe('WorkspaceSelector', () => {
     expect(screen.getByTestId('workspace-selector-btn')).toHaveTextContent('Personal Knowledge')
     fireEvent.click(screen.getByTestId('workspace-selector-btn'))
     expect(within(screen.getByRole('menu')).getByText('Personal Knowledge')).toBeInTheDocument()
+  })
+
+  it('opens the knowledge graph for the selected workspace', () => {
+    const openKnowledgeGraph = vi.fn()
+    ;(window as any).__openKnowledgeGraph = openKnowledgeGraph
+    render(<WorkspaceSelector />)
+    fireEvent.click(screen.getByTestId('workspace-selector-btn'))
+    fireEvent.click(within(screen.getByRole('menu')).getByText('Personal Knowledge'))
+    expect(openKnowledgeGraph).toHaveBeenCalledWith({ workspaceId: 'personal' })
   })
 })

@@ -45,6 +45,13 @@ export function WorkspaceSelector() {
     setOpen((value) => !value)
   }
 
+  const handleSelect = async (workspace: Workspace) => {
+    setOpen(false)
+    ;(window as any).__openKnowledgeGraph?.({ workspaceId: workspace.id })
+    if (workspace.id === displayCurrent.id) return
+    await setCurrent(workspace.id)
+  }
+
   return (
     <div style={{ position: 'relative', display: 'inline-block' }}>
       <button
@@ -73,10 +80,7 @@ export function WorkspaceSelector() {
               key={workspace.id}
               type="button"
               className={`top-chip-menu-item${workspace.id === displayCurrent.id ? ' active' : ''}`}
-              onClick={async () => {
-                await setCurrent(workspace.id)
-                setOpen(false)
-              }}
+              onClick={() => { void handleSelect(workspace) }}
             >
               {workspace.name}
             </button>
