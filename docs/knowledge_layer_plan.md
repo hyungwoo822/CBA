@@ -2014,6 +2014,8 @@ async def downgrade_template(self, workspace_id: str, target_version: str) -> di
 
 ### Phase 8 — Visualization & Human-in-the-Loop
 
+**Status:** Phase 8 MVP-v1/v2/v3 complete — moving to MCP tool plan
+
 **목표:** CLI 없이도 curation 휴먼 루프(질문 응답 / 모순 해결 / ontology proposal 승인)와 coding agent export 미리보기를 대시보드에서 수행한다. 기존 FastAPI + WebSocket + React + Zustand 스택을 재사용.
 
 **산출물:**
