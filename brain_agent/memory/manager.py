@@ -22,6 +22,8 @@ from brain_agent.memory.brain_state import BrainStateStore
 from brain_agent.memory.dreaming import RecallTracker
 from brain_agent.memory.workspace_store import WorkspaceStore
 from brain_agent.memory.ontology_store import OntologyStore
+from brain_agent.memory.contradictions_store import ContradictionsStore
+from brain_agent.memory.open_questions_store import OpenQuestionsStore
 from brain_agent.memory.raw_vault import RawVault
 from brain_agent.migrations import MigrationRunner
 
@@ -72,6 +74,12 @@ class MemoryManager:
         self.ontology = OntologyStore(
             db_path=os.path.join(db_dir, "ontology.db"),
         )
+        self.contradictions = ContradictionsStore(
+            db_path=os.path.join(db_dir, "contradictions.db"),
+        )
+        self.open_questions = OpenQuestionsStore(
+            db_path=os.path.join(db_dir, "open_questions.db"),
+        )
         self.raw_vault = RawVault(
             db_path=os.path.join(db_dir, "raw_vault.db"),
             data_dir=db_dir,
@@ -109,6 +117,8 @@ class MemoryManager:
         await self.workspace.initialize()
         await self.ontology.initialize()
         await self.ontology.seed_universal()
+        await self.contradictions.initialize()
+        await self.open_questions.initialize()
         await self.raw_vault.initialize()
 
     async def close(self) -> None:
@@ -119,6 +129,8 @@ class MemoryManager:
         await self.brain_state.close()
         await self.workspace.close()
         await self.ontology.close()
+        await self.contradictions.close()
+        await self.open_questions.close()
         await self.raw_vault.close()
 
     # ------------------------------------------------------------------
