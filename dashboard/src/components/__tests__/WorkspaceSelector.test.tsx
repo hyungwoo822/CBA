@@ -44,4 +44,15 @@ describe('WorkspaceSelector', () => {
     fireEvent.click(screen.getByTestId('workspace-selector-btn'))
     expect(within(screen.getByRole('menu')).getByText('Personal Knowledge')).toBeInTheDocument()
   })
+
+  it('keeps Personal Knowledge visible when the workspace API has not returned anything', () => {
+    useBrainStore.setState({
+      workspaces: [],
+      currentWorkspace: null,
+    })
+    render(<WorkspaceSelector />)
+    expect(screen.getByTestId('workspace-selector-btn')).toHaveTextContent('Personal Knowledge')
+    fireEvent.click(screen.getByTestId('workspace-selector-btn'))
+    expect(within(screen.getByRole('menu')).getByText('Personal Knowledge')).toBeInTheDocument()
+  })
 })

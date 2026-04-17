@@ -1,15 +1,26 @@
 import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useWorkspace } from '../hooks/useWorkspace'
+import type { Workspace } from '../stores/brainState'
+
+const PERSONAL_WORKSPACE: Workspace = {
+  id: 'personal',
+  name: 'Personal Knowledge',
+  decay_policy: 'normal',
+}
 
 export function WorkspaceSelector() {
   const { current, workspaces, setCurrent } = useWorkspace()
   const [open, setOpen] = useState(false)
   const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0, width: 200 })
   const buttonRef = useRef<HTMLButtonElement>(null)
-  const options = current && !workspaces.some((workspace) => workspace.id === current.id)
-    ? [current, ...workspaces]
-    : workspaces
+  const displayCurrent = current
+    || workspaces.find((workspace) => workspace.id === PERSONAL_WORKSPACE.id)
+    || PERSONAL_WORKSPACE
+  const options = [
+    displayCurrent,
+    ...workspaces.filter((workspace) => workspace.id !== displayCurrent.id),
+  ]
 
   const toggleOpen = () => {
     const rect = buttonRef.current?.getBoundingClientRect()
@@ -33,7 +44,7 @@ export function WorkspaceSelector() {
         onClick={toggleOpen}
         data-testid="workspace-selector-btn"
       >
-        {current?.name || 'Select workspace'}
+        {displayCurrent.name}
         <span className="top-chip-caret">v</span>
       </button>
       {open && createPortal(
@@ -50,7 +61,7 @@ export function WorkspaceSelector() {
             <button
               key={workspace.id}
               type="button"
-              className={`top-chip-menu-item${workspace.id === current?.id ? ' active' : ''}`}
+              className={`top-chip-menu-item${workspace.id === displayCurrent.id ? ' active' : ''}`}
               onClick={async () => {
                 await setCurrent(workspace.id)
                 setOpen(false)
