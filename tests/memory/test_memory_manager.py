@@ -3,6 +3,7 @@ import pytest
 from brain_agent.memory.manager import MemoryManager
 from brain_agent.memory.contradictions_store import ContradictionsStore
 from brain_agent.memory.open_questions_store import OpenQuestionsStore
+from brain_agent.memory.personal_adapter import PersonalAdapter
 from brain_agent.memory.workspace_store import WorkspaceStore, PERSONAL_WORKSPACE_ID
 from brain_agent.memory.ontology_store import OntologyStore
 from brain_agent.memory.ontology_seed import UNIVERSAL_WORKSPACE_ID
@@ -522,3 +523,31 @@ async def test_memory_manager_phase2_stores_survive_reopen(tmp_path, mock_embedd
         assert await mm2.open_questions.count_blocking("personal") == 1
     finally:
         await mm2.close()
+
+
+async def test_memory_manager_exposes_personal_adapter(tmp_path, mock_embedding):
+    """mm.personal is a PersonalAdapter wired to mm.workspace/ontology/semantic."""
+    mm = MemoryManager(db_dir=str(tmp_path), embed_fn=mock_embedding)
+    await mm.initialize()
+    try:
+        assert isinstance(mm.personal, PersonalAdapter)
+        assert mm.personal._workspace is mm.workspace
+        assert mm.personal._ontology is mm.ontology
+        assert mm.personal._semantic is mm.semantic
+    finally:
+        await mm.close()
+
+
+async def test_memory_manager_personal_adapter_reads_semantic_writes(
+    tmp_path, mock_embedding,
+):
+    """Facts written via mm.semantic are visible via mm.personal.get_user_facts."""
+    mm = MemoryManager(db_dir=str(tmp_path), embed_fn=mock_embedding)
+    await mm.initialize()
+    try:
+        await mm.semantic.add_identity_fact("user_model", "name", "Alice")
+        facts = await mm.personal.get_user_facts()
+        assert len(facts) == 1
+        assert facts[0]["value"] == "Alice"
+    finally:
+        await mm.close()

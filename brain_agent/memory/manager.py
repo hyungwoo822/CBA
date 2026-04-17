@@ -22,6 +22,7 @@ from brain_agent.memory.brain_state import BrainStateStore
 from brain_agent.memory.dreaming import RecallTracker
 from brain_agent.memory.workspace_store import WorkspaceStore
 from brain_agent.memory.ontology_store import OntologyStore
+from brain_agent.memory.personal_adapter import PersonalAdapter
 from brain_agent.memory.contradictions_store import ContradictionsStore
 from brain_agent.memory.open_questions_store import OpenQuestionsStore
 from brain_agent.memory.raw_vault import RawVault
@@ -73,6 +74,12 @@ class MemoryManager:
         )
         self.ontology = OntologyStore(
             db_path=os.path.join(db_dir, "ontology.db"),
+        )
+        # Zero-storage wrapper over identity_facts for the personal workspace.
+        self.personal = PersonalAdapter(
+            workspace_store=self.workspace,
+            ontology_store=self.ontology,
+            semantic_store=self.semantic,
         )
         self.contradictions = ContradictionsStore(
             db_path=os.path.join(db_dir, "contradictions.db"),
