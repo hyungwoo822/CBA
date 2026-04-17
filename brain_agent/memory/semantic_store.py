@@ -44,7 +44,17 @@ class SemanticStore:
                 first_seen TEXT NOT NULL DEFAULT '',
                 last_seen TEXT NOT NULL DEFAULT '',
                 origin TEXT DEFAULT 'unknown',
-                UNIQUE(source_node, relation, target_node, origin)
+                workspace_id TEXT NOT NULL DEFAULT 'personal',
+                target_workspace_id TEXT,
+                source_ref TEXT,
+                valid_from TEXT,
+                valid_to TEXT,
+                superseded_by TEXT,
+                type_id TEXT,
+                epistemic_source TEXT DEFAULT 'asserted',
+                importance_score REAL DEFAULT 0.5,
+                never_decay INTEGER DEFAULT 0,
+                UNIQUE(workspace_id, source_node, relation, target_node, origin)
             )"""
         )
         await self._graph_db.execute(
@@ -61,6 +71,16 @@ class SemanticStore:
             ("first_seen", "TEXT NOT NULL DEFAULT ''"),
             ("last_seen", "TEXT NOT NULL DEFAULT ''"),
             ("origin", "TEXT DEFAULT 'unknown'"),
+            ("workspace_id", "TEXT DEFAULT 'personal'"),
+            ("target_workspace_id", "TEXT"),
+            ("source_ref", "TEXT"),
+            ("valid_from", "TEXT"),
+            ("valid_to", "TEXT"),
+            ("superseded_by", "TEXT"),
+            ("type_id", "TEXT"),
+            ("epistemic_source", "TEXT DEFAULT 'asserted'"),
+            ("importance_score", "REAL DEFAULT 0.5"),
+            ("never_decay", "INTEGER DEFAULT 0"),
         ]:
             try:
                 await self._graph_db.execute(
@@ -68,19 +88,49 @@ class SemanticStore:
                 )
             except Exception:
                 pass  # column already exists
+        await self._graph_db.execute(
+            "UPDATE knowledge_graph SET workspace_id = 'personal' "
+            "WHERE workspace_id IS NULL"
+        )
+        await self._graph_db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kg_workspace "
+            "ON knowledge_graph(workspace_id)"
+        )
+        await self._graph_db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kg_workspace_source "
+            "ON knowledge_graph(workspace_id, source_node)"
+        )
+        await self._graph_db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kg_workspace_target "
+            "ON knowledge_graph(workspace_id, target_node)"
+        )
+        await self._graph_db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kg_target_workspace "
+            "ON knowledge_graph(target_workspace_id)"
+        )
+        await self._graph_db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_kg_never_decay "
+            "ON knowledge_graph(workspace_id, never_decay)"
+        )
         # Migration: add UNIQUE index if missing (for DBs created before UNIQUE constraint)
         try:
             await self._graph_db.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_kg_unique_triple_origin "
-                "ON knowledge_graph(source_node, relation, target_node, origin)"
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "idx_kg_unique_workspace_triple_origin "
+                "ON knowledge_graph(workspace_id, source_node, relation, "
+                "target_node, origin)"
             )
         except Exception:
             pass
-        # Drop old triple-only unique index if it exists (replaced by triple+origin)
+        # Drop old triple-only unique index if it exists.
         try:
             await self._graph_db.execute(
-                "DROP INDEX IF EXISTS idx_kg_unique_triple"
+                "DROP INDEX IF EXISTS idx_kg_unique_triple_origin"
             )
+        except Exception:
+            pass
+        try:
+            await self._graph_db.execute("DROP INDEX IF EXISTS idx_kg_unique_triple")
         except Exception:
             pass
         # Migration: remove pre-normalization non-English entries
@@ -175,6 +225,7 @@ class SemanticStore:
         content: str,
         category: str = "general",
         strength: float = 1.0,
+        workspace_id: str = "personal",
     ) -> str:
         doc_id = str(uuid.uuid4())
         embedding = self._embed_fn(content)
@@ -187,19 +238,41 @@ class SemanticStore:
                     "category": category,
                     "strength": strength,
                     "access_count": 0,
+                    "workspace_id": workspace_id,
                 }
             ],
         )
         return doc_id
 
-    async def search(self, query: str, top_k: int = 5) -> list[dict]:
+    async def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        workspace_id: str | None = None,
+    ) -> list[dict]:
         embedding = self._embed_fn(query)
-        results = self._collection.query(
-            query_embeddings=[embedding], n_results=top_k
-        )
+        kwargs: dict = {"query_embeddings": [embedding], "n_results": top_k}
+        if workspace_id is not None and workspace_id != "personal":
+            kwargs["where"] = {"workspace_id": workspace_id}
+        elif workspace_id == "personal":
+            # Legacy Chroma docs lack workspace_id. Query broadly, then treat
+            # missing metadata as personal in Python.
+            count = max(top_k, self._collection.count())
+            kwargs["n_results"] = count or top_k
+        results = self._collection.query(**kwargs)
         out = []
         if results["documents"] and results["documents"][0]:
             for i, doc in enumerate(results["documents"][0]):
+                meta = (
+                    results["metadatas"][0][i]
+                    if results.get("metadatas")
+                    else {}
+                )
+                if meta is not None and "workspace_id" not in meta:
+                    meta = {**meta, "workspace_id": "personal"}
+                meta = meta or {"workspace_id": "personal"}
+                if workspace_id == "personal" and meta.get("workspace_id") != "personal":
+                    continue
                 out.append(
                     {
                         "id": results["ids"][0][i],
@@ -209,13 +282,11 @@ class SemanticStore:
                             if results.get("distances")
                             else None
                         ),
-                        "metadata": (
-                            results["metadatas"][0][i]
-                            if results.get("metadatas")
-                            else {}
-                        ),
+                        "metadata": meta,
                     }
                 )
+                if len(out) >= top_k:
+                    break
         return out
 
     async def count(self) -> int:
@@ -230,14 +301,24 @@ class SemanticStore:
         category: str = "GENERAL",
         confidence: str = "INFERRED",
         origin: str = "unknown",
+        workspace_id: str = "personal",
+        target_workspace_id: str | None = None,
+        source_ref: str | None = None,
+        valid_from: str | None = None,
+        epistemic_source: str = "asserted",
+        importance_score: float = 0.5,
+        never_decay: bool = False,
     ):
         now = datetime.now(timezone.utc).isoformat()
         await self._graph_db.execute(
             """INSERT INTO knowledge_graph
                (id, source_node, relation, target_node, category, confidence, weight,
-                occurrence_count, first_seen, last_seen, origin)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
-               ON CONFLICT(source_node, relation, target_node, origin) DO UPDATE SET
+                occurrence_count, first_seen, last_seen, origin,
+                workspace_id, target_workspace_id, source_ref, valid_from,
+                epistemic_source, importance_score, never_decay)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(workspace_id, source_node, relation, target_node, origin)
+               DO UPDATE SET
                    weight = MIN(1.0, MAX(excluded.weight, knowledge_graph.weight)
                             + 0.1 / (1.0 + knowledge_graph.occurrence_count * 0.5)),
                    occurrence_count = knowledge_graph.occurrence_count + 1,
@@ -246,31 +327,81 @@ class SemanticStore:
                        WHEN excluded.category != 'GENERAL' THEN excluded.category
                        ELSE knowledge_graph.category
                    END,
-                   confidence = excluded.confidence""",
-            (str(uuid.uuid4()), source, relation, target, category, confidence, weight, now, now, origin),
+                   confidence = excluded.confidence,
+                   target_workspace_id = excluded.target_workspace_id,
+                   source_ref = COALESCE(excluded.source_ref, knowledge_graph.source_ref),
+                   valid_from = COALESCE(excluded.valid_from, knowledge_graph.valid_from),
+                   epistemic_source = excluded.epistemic_source,
+                   importance_score = excluded.importance_score,
+                   never_decay = excluded.never_decay""",
+            (
+                str(uuid.uuid4()),
+                source,
+                relation,
+                target,
+                category,
+                confidence,
+                weight,
+                now,
+                now,
+                origin,
+                workspace_id,
+                target_workspace_id,
+                source_ref,
+                valid_from,
+                epistemic_source,
+                importance_score,
+                1 if never_decay else 0,
+            ),
         )
         await self._graph_db.commit()
 
-    async def get_relationships(self, node: str) -> list[dict]:
-        async with self._graph_db.execute(
-            "SELECT source_node, relation, target_node, weight, category, occurrence_count, origin, confidence "
-            "FROM knowledge_graph WHERE source_node = ? OR target_node = ?",
-            (node, node),
-        ) as cursor:
+    async def get_relationships(
+        self,
+        node: str,
+        workspace_id: str | None = "personal",
+    ) -> list[dict]:
+        select = (
+            "SELECT id, source_node, relation, target_node, weight, category, "
+            "occurrence_count, origin, confidence, workspace_id, "
+            "target_workspace_id, source_ref, valid_from, valid_to, "
+            "superseded_by, epistemic_source, importance_score, never_decay "
+            "FROM knowledge_graph "
+        )
+        if workspace_id is None:
+            sql = select + "WHERE source_node = ? OR target_node = ?"
+            args: tuple = (node, node)
+        else:
+            sql = (
+                select
+                + "WHERE (source_node = ? OR target_node = ?) AND workspace_id = ?"
+            )
+            args = (node, node, workspace_id)
+        async with self._graph_db.execute(sql, args) as cursor:
             rows = await cursor.fetchall()
-            return [
-                {
-                    "source": r[0],
-                    "relation": r[1],
-                    "target": r[2],
-                    "weight": r[3],
-                    "category": r[4],
-                    "occurrence_count": r[5],
-                    "origin": r[6] if len(r) > 6 else "unknown",
-                    "confidence": r[7] if len(r) > 7 else "INFERRED",
-                }
-                for r in rows
-            ]
+        return [
+            {
+                "id": r[0],
+                "source": r[1],
+                "relation": r[2],
+                "target": r[3],
+                "weight": r[4],
+                "category": r[5],
+                "occurrence_count": r[6],
+                "origin": r[7],
+                "confidence": r[8],
+                "workspace_id": r[9],
+                "target_workspace_id": r[10],
+                "source_ref": r[11],
+                "valid_from": r[12],
+                "valid_to": r[13],
+                "superseded_by": r[14],
+                "epistemic_source": r[15],
+                "importance_score": r[16],
+                "never_decay": r[17],
+            }
+            for r in rows
+        ]
 
     @staticmethod
     def _fuzzy_node_match(user_node: str, agent_nodes: set[str]) -> bool:
@@ -517,7 +648,11 @@ class SemanticStore:
     # NetworkX bridge methods (graph_analysis integration)
     # ------------------------------------------------------------------
 
-    async def export_as_networkx(self) -> nx.Graph:
+    async def export_as_networkx(
+        self,
+        workspace_id: str | None = None,
+        include_cross_refs: bool = True,
+    ) -> nx.Graph:
         """Export the knowledge_graph table as a NetworkX Graph.
 
         Each source and target becomes a node with a ``label`` attribute.
@@ -525,10 +660,26 @@ class SemanticStore:
         category, and confidence attributes.
         """
         G = nx.Graph()
-        async with self._graph_db.execute(
-            "SELECT source_node, relation, target_node, weight, category, confidence "
-            "FROM knowledge_graph"
-        ) as cursor:
+        if workspace_id is None:
+            sql = (
+                "SELECT source_node, relation, target_node, weight, category, "
+                "confidence FROM knowledge_graph"
+            )
+            args: tuple = ()
+        elif include_cross_refs:
+            sql = (
+                "SELECT source_node, relation, target_node, weight, category, "
+                "confidence FROM knowledge_graph "
+                "WHERE workspace_id = ? OR target_workspace_id = ?"
+            )
+            args = (workspace_id, workspace_id)
+        else:
+            sql = (
+                "SELECT source_node, relation, target_node, weight, category, "
+                "confidence FROM knowledge_graph WHERE workspace_id = ?"
+            )
+            args = (workspace_id,)
+        async with self._graph_db.execute(sql, args) as cursor:
             rows = await cursor.fetchall()
         for source, relation, target, weight, category, confidence in rows:
             if source not in G:
@@ -671,3 +822,11 @@ class SemanticStore:
         )
         await self._graph_db.commit()
         return cursor.rowcount
+
+    async def mark_superseded(self, edge_id: str, valid_to: str) -> None:
+        """Mark a knowledge graph edge as no longer current."""
+        await self._graph_db.execute(
+            "UPDATE knowledge_graph SET valid_to = ? WHERE id = ?",
+            (valid_to, edge_id),
+        )
+        await self._graph_db.commit()

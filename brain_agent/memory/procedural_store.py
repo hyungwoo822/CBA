@@ -37,14 +37,34 @@ class ProceduralStore:
                 success_rate REAL DEFAULT 0.0,
                 execution_count INTEGER DEFAULT 0,
                 success_count INTEGER DEFAULT 0,
-                stage TEXT DEFAULT 'cognitive'
+                stage TEXT DEFAULT 'cognitive',
+                workspace_id TEXT DEFAULT 'personal',
+                trigger_embedding TEXT,
+                applicable_scope TEXT DEFAULT '{}',
+                source_id TEXT
             )"""
         )
-        # Migrate: add strategy column if missing (existing DBs)
-        try:
-            await self._db.execute("ALTER TABLE procedures ADD COLUMN strategy TEXT DEFAULT ''")
-        except Exception:
-            pass  # Column already exists
+        for col, defn in [
+            ("strategy", "TEXT DEFAULT ''"),
+            ("workspace_id", "TEXT DEFAULT 'personal'"),
+            ("trigger_embedding", "TEXT"),
+            ("applicable_scope", "TEXT DEFAULT '{}'"),
+            ("source_id", "TEXT"),
+        ]:
+            try:
+                await self._db.execute(
+                    f"ALTER TABLE procedures ADD COLUMN {col} {defn}"
+                )
+            except Exception:
+                pass
+        await self._db.execute(
+            "UPDATE procedures SET workspace_id = 'personal' "
+            "WHERE workspace_id IS NULL"
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_procedures_workspace "
+            "ON procedures(workspace_id)"
+        )
         await self._db.commit()
 
     async def close(self):
@@ -56,24 +76,51 @@ class ProceduralStore:
         trigger_pattern: str,
         action_sequence: list[dict],
         strategy: str = "",
+        workspace_id: str = "personal",
+        trigger_embedding: str | None = None,
+        applicable_scope: str = "{}",
+        source_id: str | None = None,
     ) -> str:
-        """Save or update a procedure. Deduplicates by trigger_pattern + strategy.
+        """Save or update a procedure.
 
-        If a procedure with the same trigger and strategy already exists,
-        returns its existing ID instead of creating a duplicate.
+        Deduplication is scoped by trigger, strategy, and workspace.
         """
-        # Check for existing duplicate
-        existing = await self._find_by_trigger_strategy(trigger_pattern, strategy)
+        existing = await self._find_by_trigger_strategy_ws(
+            trigger_pattern, strategy, workspace_id
+        )
         if existing:
             return existing["id"]
 
         proc_id = str(uuid.uuid4())
         await self._db.execute(
-            "INSERT INTO procedures (id, trigger_pattern, action_sequence, strategy) VALUES (?, ?, ?, ?)",
-            (proc_id, trigger_pattern, json.dumps(action_sequence), strategy),
+            "INSERT INTO procedures "
+            "(id, trigger_pattern, action_sequence, strategy, workspace_id, "
+            "trigger_embedding, applicable_scope, source_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                proc_id,
+                trigger_pattern,
+                json.dumps(action_sequence),
+                strategy,
+                workspace_id,
+                trigger_embedding,
+                applicable_scope,
+                source_id,
+            ),
         )
         await self._db.commit()
         return proc_id
+
+    async def _find_by_trigger_strategy_ws(
+        self, trigger: str, strategy: str, workspace_id: str
+    ) -> dict | None:
+        async with self._db.execute(
+            "SELECT * FROM procedures "
+            "WHERE trigger_pattern = ? AND strategy = ? AND workspace_id = ?",
+            (trigger, strategy, workspace_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return self._row_to_dict(cursor.description, row) if row else None
 
     async def _find_by_trigger_strategy(self, trigger: str, strategy: str) -> dict | None:
         """Find an existing procedure by trigger_pattern + strategy."""
@@ -91,20 +138,20 @@ class ProceduralStore:
         """
         # Find groups with same trigger+strategy
         async with self._db.execute(
-            """SELECT trigger_pattern, strategy, COUNT(*) as cnt
+            """SELECT trigger_pattern, strategy, workspace_id, COUNT(*) as cnt
                FROM procedures
-               GROUP BY trigger_pattern, strategy
+               GROUP BY trigger_pattern, strategy, workspace_id
                HAVING cnt > 1"""
         ) as cursor:
             dupes = await cursor.fetchall()
 
         removed = 0
-        for trigger, strategy, count in dupes:
+        for trigger, strategy, workspace_id, count in dupes:
             async with self._db.execute(
                 """SELECT id, execution_count FROM procedures
-                   WHERE trigger_pattern = ? AND strategy = ?
+                   WHERE trigger_pattern = ? AND strategy = ? AND workspace_id = ?
                    ORDER BY execution_count DESC""",
-                (trigger, strategy),
+                (trigger, strategy, workspace_id),
             ) as cursor:
                 rows = await cursor.fetchall()
             # Keep the first (highest execution_count), delete the rest
@@ -123,8 +170,18 @@ class ProceduralStore:
             rows = await cursor.fetchall()
             return [self._row_to_dict(cursor.description, r) for r in rows]
 
-    async def match(self, input_text: str) -> dict | None:
-        async with self._db.execute("SELECT * FROM procedures") as cursor:
+    async def match(
+        self,
+        input_text: str,
+        workspace_id: str | None = "personal",
+    ) -> dict | None:
+        if workspace_id is None:
+            sql = "SELECT * FROM procedures"
+            args: tuple = ()
+        else:
+            sql = "SELECT * FROM procedures WHERE workspace_id = ?"
+            args = (workspace_id,)
+        async with self._db.execute(sql, args) as cursor:
             for row in await cursor.fetchall():
                 d = self._row_to_dict(cursor.description, row)
                 if fnmatch.fnmatch(input_text.lower(), d["trigger_pattern"].lower()):

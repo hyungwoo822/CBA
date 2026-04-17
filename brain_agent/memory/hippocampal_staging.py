@@ -43,8 +43,45 @@ class HippocampalStaging:
                 strength REAL DEFAULT 1.0,
                 consolidated INTEGER DEFAULT 0,
                 last_interaction INTEGER DEFAULT 0,
-                last_session TEXT DEFAULT ''
+                last_session TEXT DEFAULT '',
+                workspace_id TEXT DEFAULT 'personal'
             )"""
+        )
+        try:
+            await self._db.execute(
+                "ALTER TABLE staging_memories "
+                "ADD COLUMN workspace_id TEXT DEFAULT 'personal'"
+            )
+        except Exception:
+            pass
+        await self._db.execute(
+            "UPDATE staging_memories SET workspace_id = 'personal' "
+            "WHERE workspace_id IS NULL"
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_staging_workspace "
+            "ON staging_memories(workspace_id, consolidated)"
+        )
+        await self._db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS staging_edges (
+                id TEXT PRIMARY KEY,
+                workspace_id TEXT NOT NULL DEFAULT 'personal',
+                source_node TEXT NOT NULL,
+                relation TEXT NOT NULL,
+                target_node TEXT NOT NULL,
+                interaction_id INTEGER NOT NULL DEFAULT 0,
+                session_id TEXT NOT NULL DEFAULT '',
+                importance_score REAL DEFAULT 0.5,
+                never_decay INTEGER DEFAULT 0,
+                consolidated INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_staging_edges_workspace "
+            "ON staging_edges(workspace_id, consolidated)"
         )
         await self._db.commit()
 
@@ -64,6 +101,7 @@ class HippocampalStaging:
         session_id: str,
         emotional_tag: dict | None = None,
         source_modality: str = "text",
+        workspace_id: str = "personal",
     ) -> str:
         mem_id = str(uuid.uuid4())
         embedding = self._embed_fn(content)
@@ -75,7 +113,9 @@ class HippocampalStaging:
             try:
                 async with self._db.execute(
                     "SELECT id, context_embedding FROM staging_memories "
-                    "WHERE consolidated = 0 ORDER BY last_interaction DESC LIMIT 10"
+                    "WHERE consolidated = 0 AND workspace_id = ? "
+                    "ORDER BY last_interaction DESC LIMIT 10",
+                    (workspace_id,),
                 ) as cur:
                     rows = await cur.fetchall()
                 for row in rows:
@@ -99,8 +139,8 @@ class HippocampalStaging:
             "INSERT INTO staging_memories "
             "(id, timestamp, content, context_embedding, entities, emotional_tag, "
             "source_modality, access_count, strength, consolidated, "
-            "last_interaction, last_session) "
-            "VALUES (?,?,?,?,?,?,?,0,1.0,0,?,?)",
+            "last_interaction, last_session, workspace_id) "
+            "VALUES (?,?,?,?,?,?,?,0,1.0,0,?,?,?)",
             (
                 mem_id,
                 datetime.now(timezone.utc).isoformat(),
@@ -111,6 +151,7 @@ class HippocampalStaging:
                 source_modality,
                 interaction_id,
                 session_id,
+                workspace_id,
             ),
         )
         await self._db.commit()
@@ -158,21 +199,114 @@ class HippocampalStaging:
             row = await cursor.fetchone()
             return self._row_to_dict(cursor.description, row) if row else None
 
-    async def get_unconsolidated(self) -> list[dict]:
-        async with self._db.execute(
-            "SELECT * FROM staging_memories "
-            "WHERE consolidated = 0 ORDER BY last_interaction"
-        ) as cursor:
+    async def get_unconsolidated(
+        self, workspace_id: str | None = "personal"
+    ) -> list[dict]:
+        if workspace_id is None:
+            sql = (
+                "SELECT * FROM staging_memories WHERE consolidated = 0 "
+                "ORDER BY last_interaction"
+            )
+            args: tuple = ()
+        else:
+            sql = (
+                "SELECT * FROM staging_memories "
+                "WHERE consolidated = 0 AND workspace_id = ? "
+                "ORDER BY last_interaction"
+            )
+            args = (workspace_id,)
+        async with self._db.execute(sql, args) as cursor:
             return [
                 self._row_to_dict(cursor.description, r)
                 for r in await cursor.fetchall()
             ]
 
-    async def count_unconsolidated(self) -> int:
-        async with self._db.execute(
-            "SELECT COUNT(*) FROM staging_memories WHERE consolidated = 0"
-        ) as cursor:
+    async def count_unconsolidated(
+        self, workspace_id: str | None = "personal"
+    ) -> int:
+        if workspace_id is None:
+            sql = "SELECT COUNT(*) FROM staging_memories WHERE consolidated = 0"
+            args: tuple = ()
+        else:
+            sql = (
+                "SELECT COUNT(*) FROM staging_memories "
+                "WHERE consolidated = 0 AND workspace_id = ?"
+            )
+            args = (workspace_id,)
+        async with self._db.execute(sql, args) as cursor:
             return (await cursor.fetchone())[0]
+
+    # ------------------------------------------------------------------
+    # Edge staging
+    # ------------------------------------------------------------------
+
+    async def encode_edge(
+        self,
+        source: str,
+        relation: str,
+        target: str,
+        interaction_id: int,
+        session_id: str,
+        workspace_id: str = "personal",
+        importance_score: float = 0.5,
+        never_decay: bool = False,
+    ) -> str:
+        eid = str(uuid.uuid4())
+        await self._db.execute(
+            "INSERT INTO staging_edges "
+            "(id, workspace_id, source_node, relation, target_node, "
+            "interaction_id, session_id, importance_score, never_decay, "
+            "consolidated, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+            (
+                eid,
+                workspace_id,
+                source,
+                relation,
+                target,
+                interaction_id,
+                session_id,
+                importance_score,
+                1 if never_decay else 0,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        await self._db.commit()
+        return eid
+
+    async def get_unconsolidated_edges(
+        self, workspace_id: str | None = "personal"
+    ) -> list[dict]:
+        if workspace_id is None:
+            sql = (
+                "SELECT * FROM staging_edges WHERE consolidated = 0 "
+                "ORDER BY created_at"
+            )
+            args: tuple = ()
+        else:
+            sql = (
+                "SELECT * FROM staging_edges "
+                "WHERE consolidated = 0 AND workspace_id = ? "
+                "ORDER BY created_at"
+            )
+            args = (workspace_id,)
+        async with self._db.execute(sql, args) as cursor:
+            desc = cursor.description
+            return [
+                {col[0]: val for col, val in zip(desc, row)}
+                for row in await cursor.fetchall()
+            ]
+
+    async def reinforce(
+        self, mem_id: str, boost: float = RETRIEVAL_BOOST_DEFAULT
+    ) -> None:
+        await self._db.execute(
+            "UPDATE staging_memories "
+            "SET strength = strength * ?, access_count = access_count + 1 "
+            "WHERE id = ?",
+            (boost, mem_id),
+        )
+        await self._db.commit()
 
     # ------------------------------------------------------------------
     # Helpers

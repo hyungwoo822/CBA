@@ -20,6 +20,10 @@ from brain_agent.memory.retrieval import RetrievalEngine
 from brain_agent.memory.consolidation import ConsolidationEngine, ConsolidationResult
 from brain_agent.memory.brain_state import BrainStateStore
 from brain_agent.memory.dreaming import RecallTracker
+from brain_agent.memory.workspace_store import WorkspaceStore
+from brain_agent.memory.ontology_store import OntologyStore
+from brain_agent.memory.raw_vault import RawVault
+from brain_agent.migrations import MigrationRunner
 
 
 class MemoryManager:
@@ -62,6 +66,20 @@ class MemoryManager:
         self.brain_state = BrainStateStore(
             db_path=os.path.join(db_dir, "brain_state.db"),
         )
+        self.workspace = WorkspaceStore(
+            db_path=os.path.join(db_dir, "workspaces.db"),
+        )
+        self.ontology = OntologyStore(
+            db_path=os.path.join(db_dir, "ontology.db"),
+        )
+        self.raw_vault = RawVault(
+            db_path=os.path.join(db_dir, "raw_vault.db"),
+            data_dir=db_dir,
+        )
+        self._migrations = MigrationRunner(
+            brain_state_db=os.path.join(db_dir, "brain_state.db"),
+            data_dir=db_dir,
+        )
         self.forgetting = ForgettingEngine()
         self.retrieval = RetrievalEngine()
         self.recall_tracker = RecallTracker()
@@ -82,11 +100,16 @@ class MemoryManager:
     # ------------------------------------------------------------------
 
     async def initialize(self) -> None:
+        await self._migrations.apply_pending()
         await self.staging.initialize()
         await self.episodic.initialize()
         await self.semantic.initialize()
         await self.procedural.initialize()
         await self.brain_state.initialize()
+        await self.workspace.initialize()
+        await self.ontology.initialize()
+        await self.ontology.seed_universal()
+        await self.raw_vault.initialize()
 
     async def close(self) -> None:
         await self.staging.close()
@@ -94,6 +117,9 @@ class MemoryManager:
         await self.semantic.close()
         await self.procedural.close()
         await self.brain_state.close()
+        await self.workspace.close()
+        await self.ontology.close()
+        await self.raw_vault.close()
 
     # ------------------------------------------------------------------
     # Context

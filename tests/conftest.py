@@ -15,3 +15,20 @@ def mock_embedding():
         vec = vec / np.linalg.norm(vec)
         return vec.tolist()
     return _embed
+
+
+@pytest.fixture
+async def memory_manager(tmp_path, mock_embedding):
+    """MemoryManager with personal workspace and universal ontology seed."""
+    from brain_agent.memory.manager import MemoryManager
+
+    mm = MemoryManager(db_dir=str(tmp_path), embed_fn=mock_embedding)
+    await mm.initialize()
+    yield mm
+    await mm.close()
+
+
+@pytest.fixture
+async def personal_workspace_id(memory_manager):
+    workspace = await memory_manager.workspace.get_or_create_personal()
+    return workspace["id"]

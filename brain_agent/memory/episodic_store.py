@@ -39,8 +39,42 @@ class EpisodicStore:
                 access_count INTEGER DEFAULT 0,
                 last_interaction INTEGER DEFAULT 0,
                 last_session TEXT DEFAULT '',
-                schema_links TEXT DEFAULT '[]'
+                schema_links TEXT DEFAULT '[]',
+                workspace_id TEXT DEFAULT 'personal',
+                source_id TEXT,
+                event_type TEXT DEFAULT 'conversation_turn',
+                actor TEXT,
+                importance_score REAL DEFAULT 0.5,
+                never_decay INTEGER DEFAULT 0
             )"""
+        )
+        for col, defn in [
+            ("workspace_id", "TEXT DEFAULT 'personal'"),
+            ("source_id", "TEXT"),
+            ("event_type", "TEXT DEFAULT 'conversation_turn'"),
+            ("actor", "TEXT"),
+            ("importance_score", "REAL DEFAULT 0.5"),
+            ("never_decay", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                await self._db.execute(f"ALTER TABLE episodes ADD COLUMN {col} {defn}")
+            except Exception:
+                pass
+        await self._db.execute(
+            "UPDATE episodes SET workspace_id = 'personal' "
+            "WHERE workspace_id IS NULL"
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_episodes_workspace "
+            "ON episodes(workspace_id)"
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_episodes_workspace_interaction "
+            "ON episodes(workspace_id, last_interaction)"
+        )
+        await self._db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_episodes_never_decay "
+            "ON episodes(workspace_id, never_decay)"
         )
         await self._db.commit()
 
@@ -62,13 +96,20 @@ class EpisodicStore:
         session_id: str,
         strength: float = 1.0,
         access_count: int = 0,
+        workspace_id: str = "personal",
+        source_id: str | None = None,
+        event_type: str = "conversation_turn",
+        actor: str | None = None,
+        importance_score: float = 0.5,
+        never_decay: bool = False,
     ) -> str:
         ep_id = str(uuid.uuid4())
         await self._db.execute(
             "INSERT INTO episodes "
             "(id, timestamp, content, context_embedding, entities, "
-            "emotional_tag, strength, access_count, last_interaction, last_session) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "emotional_tag, strength, access_count, last_interaction, last_session, "
+            "workspace_id, source_id, event_type, actor, importance_score, never_decay) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 ep_id,
                 datetime.now(timezone.utc).isoformat(),
@@ -80,6 +121,12 @@ class EpisodicStore:
                 access_count,
                 interaction_id,
                 session_id,
+                workspace_id,
+                source_id,
+                event_type,
+                actor,
+                importance_score,
+                1 if never_decay else 0,
             ),
         )
         await self._db.commit()
@@ -133,11 +180,21 @@ class EpisodicStore:
             row = await cursor.fetchone()
             return self._row_to_dict(cursor.description, row) if row else None
 
-    async def get_recent(self, limit: int = 10) -> list[dict]:
-        async with self._db.execute(
-            "SELECT * FROM episodes ORDER BY last_interaction DESC LIMIT ?",
-            (limit,),
-        ) as cursor:
+    async def get_recent(
+        self,
+        limit: int = 10,
+        workspace_id: str | None = "personal",
+    ) -> list[dict]:
+        if workspace_id is None:
+            sql = "SELECT * FROM episodes ORDER BY last_interaction DESC LIMIT ?"
+            args: tuple = (limit,)
+        else:
+            sql = (
+                "SELECT * FROM episodes WHERE workspace_id = ? "
+                "ORDER BY last_interaction DESC LIMIT ?"
+            )
+            args = (workspace_id, limit)
+        async with self._db.execute(sql, args) as cursor:
             return [
                 self._row_to_dict(cursor.description, r)
                 for r in await cursor.fetchall()
