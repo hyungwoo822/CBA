@@ -111,4 +111,33 @@ class PersonalAdapter:
 
         return nodes
 
-    # write_from_nodes is added in Task 3.
+    async def write_from_nodes(self, nodes: list[dict]) -> None:
+        """Write personal Person node properties back to identity_facts.
+
+        ``label='user'`` maps to ``user_model`` and ``label='agent'`` maps to
+        ``self_model``. Unknown labels raise instead of being silently dropped.
+        Missing per-property metadata defaults to confidence 1.0 and source
+        ``personal_adapter``.
+        """
+        for node in nodes:
+            label = node.get("label")
+            if label not in _LABEL_TO_FACT_TYPE:
+                raise ValueError(
+                    f"unknown label {label!r}: expected 'user' or 'agent'"
+                )
+
+            fact_type = _LABEL_TO_FACT_TYPE[label]
+            properties: dict[str, str] = node.get("properties", {}) or {}
+            property_meta: dict[str, dict] = node.get("property_meta", {}) or {}
+
+            for key, value in properties.items():
+                per_key_meta = property_meta.get(key, {})
+                confidence = float(per_key_meta.get("confidence", 1.0))
+                source = per_key_meta.get("source", "personal_adapter")
+                await self._semantic.add_identity_fact(
+                    fact_type,
+                    key,
+                    str(value),
+                    source=source,
+                    confidence=confidence,
+                )

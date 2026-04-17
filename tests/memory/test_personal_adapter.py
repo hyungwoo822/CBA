@@ -126,3 +126,91 @@ async def test_render_as_nodes_default_workspace_id_is_personal(
     nodes_explicit = await adapter.render_as_nodes(workspace_id=PERSONAL_WORKSPACE_ID)
     assert nodes_default == nodes_explicit
     assert len(nodes_default) == 1
+
+
+async def test_write_from_nodes_user_label_writes_user_model(adapter, memory_manager):
+    node = {
+        "type": "Person",
+        "label": "user",
+        "workspace_id": PERSONAL_WORKSPACE_ID,
+        "properties": {"name": "Alice", "city": "Seoul"},
+    }
+    await adapter.write_from_nodes([node])
+    raw = await memory_manager.semantic.get_identity_facts("user_model")
+    by_key = {f["key"]: f["value"] for f in raw}
+    assert by_key == {"name": "Alice", "city": "Seoul"}
+
+
+async def test_write_from_nodes_agent_label_writes_self_model(adapter, memory_manager):
+    node = {
+        "type": "Person",
+        "label": "agent",
+        "workspace_id": PERSONAL_WORKSPACE_ID,
+        "properties": {"role": "assistant"},
+    }
+    await adapter.write_from_nodes([node])
+    raw = await memory_manager.semantic.get_identity_facts("self_model")
+    assert raw[0]["key"] == "role"
+    assert raw[0]["value"] == "assistant"
+
+
+async def test_write_from_nodes_unknown_label_raises(adapter):
+    node = {
+        "type": "Person",
+        "label": "stranger",
+        "workspace_id": PERSONAL_WORKSPACE_ID,
+        "properties": {"name": "X"},
+    }
+    with pytest.raises(ValueError, match="unknown label"):
+        await adapter.write_from_nodes([node])
+
+
+async def test_write_from_nodes_applies_property_meta_confidence(
+    adapter, memory_manager,
+):
+    """property_meta.confidence propagates to identity_facts.confidence."""
+    node = {
+        "type": "Person",
+        "label": "user",
+        "workspace_id": PERSONAL_WORKSPACE_ID,
+        "properties": {"name": "Alice"},
+        "property_meta": {"name": {"confidence": 0.42, "source": "from-node"}},
+    }
+    await adapter.write_from_nodes([node])
+    raw = await memory_manager.semantic.get_identity_facts("user_model")
+    assert raw[0]["confidence"] == pytest.approx(0.42)
+    assert raw[0]["source"] == "from-node"
+
+
+async def test_write_from_nodes_default_confidence(adapter, memory_manager):
+    """Missing property_meta defaults confidence to 1.0 and source to personal_adapter."""
+    node = {
+        "type": "Person",
+        "label": "user",
+        "workspace_id": PERSONAL_WORKSPACE_ID,
+        "properties": {"name": "Alice"},
+    }
+    await adapter.write_from_nodes([node])
+    raw = await memory_manager.semantic.get_identity_facts("user_model")
+    assert raw[0]["confidence"] == pytest.approx(1.0)
+    assert raw[0]["source"] == "personal_adapter"
+
+
+async def test_round_trip_integrity(adapter, memory_manager):
+    """add -> render_as_nodes -> write_from_nodes -> get_user_facts preserves values."""
+    await memory_manager.semantic.add_identity_fact(
+        "user_model", "name", "Alice", source="seed", confidence=0.9,
+    )
+    await memory_manager.semantic.add_identity_fact(
+        "user_model", "city", "Seoul", source="seed", confidence=0.7,
+    )
+
+    snapshot = await adapter.render_as_nodes()
+    await adapter.write_from_nodes(snapshot)
+
+    facts_after = await adapter.get_user_facts()
+    by_key = {f["key"]: f for f in facts_after}
+    assert by_key["name"]["value"] == "Alice"
+    assert by_key["name"]["confidence"] == pytest.approx(0.9)
+    assert by_key["city"]["value"] == "Seoul"
+    assert by_key["city"]["confidence"] == pytest.approx(0.7)
