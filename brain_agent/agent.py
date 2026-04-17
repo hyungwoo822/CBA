@@ -125,6 +125,7 @@ class BrainAgent:
             memory=self.memory,
             llm_provider=self._llm_provider,
             barrier_mw=self._barrier_mw,
+            extraction_config=self.config.extraction,
         )
         self._initialized = False
 
@@ -179,6 +180,13 @@ class BrainAgent:
             else ""
         )
         self.memory.set_context(interaction_id, session_id)
+        self.pipeline._session_id = session_id
+        if session_id:
+            try:
+                current_workspace = await self.memory.workspace.get_session_workspace(session_id)
+                await self.memory.workspace.set_session_workspace(session_id, current_workspace)
+            except Exception:
+                logger.debug("Session workspace binding failed", exc_info=True)
 
         # ── Determine modality ──
         modality = "text"

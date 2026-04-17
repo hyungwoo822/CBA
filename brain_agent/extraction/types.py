@@ -55,3 +55,4 @@ class ExtractionResult:
     response_text: str = ""
     response_mode: str = "normal"
     clarification_questions: list[str] = field(default_factory=list)
+    workspace_ask: str | None = None

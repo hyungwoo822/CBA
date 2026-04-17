@@ -117,33 +117,65 @@ class TestBrocaInject:
         assert signal.payload["actions"][0]["args"]["text"] == "original"
 
 
-class TestPostSynapticConsolidation:
+class TestExtractionOrchestratorParity:
+    """Phase 5 orchestrator replaces the old PSC direct call."""
+
     @pytest.mark.asyncio
-    async def test_psc_parses_response(self):
-        from brain_agent.pipeline import ProcessingPipeline
+    async def test_orchestrator_returns_extraction_result(self):
+        from brain_agent.config.schema import ExtractionConfig
+        from brain_agent.extraction.orchestrator import ExtractionOrchestrator
         from brain_agent.memory.manager import MemoryManager
 
         mock_mem = MagicMock(spec=MemoryManager)
-        mock_mem.sensory = MagicMock()
-        mock_mem.working = MagicMock()
-        mock_mem.brain_state = MagicMock()
-        mock_mem.recall_tracker = MagicMock()
-        mock_mem.set_neuromodulators = MagicMock()
-        mock_mem.set_cortisol_accessor = MagicMock()
+        mock_mem._interaction_counter = 0
+        mock_mem.workspace = MagicMock()
+        mock_mem.workspace.get_session_workspace = AsyncMock(return_value="personal")
+        mock_mem.workspace.get_workspace = AsyncMock(return_value={"id": "personal", "name": "Personal Knowledge"})
+        mock_mem.raw_vault = MagicMock()
+        mock_mem.raw_vault.ingest = AsyncMock(return_value={"id": "src1"})
+        mock_mem.ontology = MagicMock()
+        mock_mem.ontology.get_node_types = AsyncMock(return_value=[{"name": "Concept"}])
+        mock_mem.ontology.get_relation_types = AsyncMock(return_value=[{"name": "ask"}])
+        mock_mem.ontology.get_node_schema = AsyncMock(return_value={"required": []})
+        mock_mem.ontology.increment_occurrence = AsyncMock()
+        mock_mem.ontology.register_node_type = AsyncMock()
+        mock_mem.ontology.propose_node_type = AsyncMock()
+        mock_mem.ontology.register_relation_type = AsyncMock()
+        mock_mem.ontology.propose_relation_type = AsyncMock()
+        mock_mem.semantic = MagicMock()
+        mock_mem.semantic.get_relationships = AsyncMock(return_value=[])
+        mock_mem.semantic.search = AsyncMock(return_value=[])
+        mock_mem.semantic.find_events_near = AsyncMock(return_value=[])
+        mock_mem.semantic.mark_superseded = AsyncMock()
+        mock_mem.staging = MagicMock()
+        mock_mem.staging.encode = AsyncMock(return_value="ep1")
+        mock_mem.staging.encode_edge = AsyncMock()
+        mock_mem.staging.reinforce = AsyncMock()
+        mock_mem.contradictions = MagicMock()
+        mock_mem.contradictions.detect = AsyncMock()
+        mock_mem.open_questions = MagicMock()
+        mock_mem.open_questions.add_question = AsyncMock()
         mock_provider = MagicMock()
         mock_provider.chat = AsyncMock(return_value=LLMResponse(
-            content='{"refined_response": "polished text", '
-                    '"user_facts": {"entities": ["weather"], "relations": [["user", "ask", "weather", 0.8, "ACTION"]]}, '
-                    '"procedural": null}',
+            content='{"nodes":[{"type":"Concept","label":"weather","properties":{},"confidence":"EXTRACTED"}],'
+                    '"edges":[{"source":"user","relation":"ask","target":"weather","confidence":"EXTRACTED",'
+                    '"epistemic_source":"asserted","importance_score":0.8,"never_decay":0}],'
+                    '"new_type_proposals":[],"narrative_chunk":"what is the weather"}',
         ))
+        mock_provider.get_default_model.return_value = "mock-model"
 
-        pipeline = ProcessingPipeline(memory=mock_mem, llm_provider=mock_provider)
-        result = await pipeline._post_synaptic_consolidation(
-            original_input="what is the weather",
-            agent_response="It is sunny today",
-            comprehension={"intent": "question", "language": "en"},
+        orchestrator = ExtractionOrchestrator(
+            memory=mock_mem,
+            llm_provider=mock_provider,
+            config=ExtractionConfig(),
+        )
+        result = await orchestrator.extract(
+            text="user ask weather important",
+            session_id="s1",
+            comprehension={"intent": "inform", "language": "en"},
         )
 
-        assert result["refined_response"] == "polished text"
-        assert result["user_facts"]["entities"] == ["weather"]
-        assert result["procedural"] is None
+        assert result.workspace_id == "personal"
+        assert result.response_mode in {"normal", "append", "block"}
+        assert hasattr(result, "clarification_questions")
+        assert result.edges[0]["target"] == "weather"

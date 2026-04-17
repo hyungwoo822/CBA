@@ -200,7 +200,7 @@ class HippocampalStaging:
             return self._row_to_dict(cursor.description, row) if row else None
 
     async def get_unconsolidated(
-        self, workspace_id: str | None = "personal"
+        self, workspace_id: str | None = None
     ) -> list[dict]:
         if workspace_id is None:
             sql = (

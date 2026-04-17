@@ -445,3 +445,19 @@ def test_classify_complexity_with_metadata():
     """Verify _classify_complexity still works (regression)."""
     from brain_agent.pipeline import _classify_complexity
     assert _classify_complexity({"complexity": "simple", "intent": "greeting"}, has_procedure=True) == "fast"
+
+
+def test_pipeline_result_defaults_are_backward_compatible():
+    """New fields default to neutral values so existing callers are unaffected."""
+    from brain_agent.pipeline import PipelineResult
+
+    r = PipelineResult()
+    assert r.response == ""
+    assert r.actions_taken == []
+    assert r.response_mode == "normal"
+    assert r.clarification_questions == []
+    assert r.workspace_id == ""
+    assert r.workspace_ask is None
+    assert r.retrieval_contradictions == []
+    assert r.retrieval_gaps == []
+    assert r.retrieval_inference_fill == []

@@ -18,6 +18,7 @@ class ExtractionConfig:
     max_retry: int = 1
     enable_severity_block: bool = True
     promotion_threshold_n: int = 3
+    expression_override_block: bool = True
 
     max_open_questions_per_extraction: int = 3
     fok_similarity_threshold: float = 0.3

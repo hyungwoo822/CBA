@@ -32,6 +32,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ── LLM prompt for Wernicke comprehension ──────────────────────────────
+# M1 NOTE: workspace_hint and workspace_hint_confidence are pragmatic,
+# discourse-level signals. Anatomically they fit TPJ or dlPFC better than
+# Wernicke, but this region already owns the comprehension LLM call; keeping
+# them here avoids another round trip until a dedicated pragmatic region lands.
 
 _WERNICKE_SYSTEM_PROMPT = """\
 You are the language comprehension module (Wernicke's area) in a brain-inspired AI system.
@@ -45,7 +49,9 @@ Analyze the input and return ONLY a JSON object with these fields:
   "keywords": ["keyword1", "keyword2", ...],
   "semantic_roles": {"agent": "...", "action": "...", "patient": "...", "topic": "..."},
   "discourse_type": "<request|narrative|argument|description|social|technical>",
-  "language": "<en|ko|mixed>"
+  "language": "<en|ko|mixed>",
+  "workspace_hint": "<domain-or-workspace-name-or-null>",
+  "workspace_hint_confidence": <0.0 to 1.0>
 }
 
 Rules:
@@ -57,6 +63,9 @@ Rules:
 - semantic_roles: Core participants. Use null for absent roles.
 - discourse_type: Overall communicative frame.
 - language: Primary language detected.
+- workspace_hint: Pragmatic domain cue. If the text strongly implies a specific project, \
+domain, product area, API, or named workspace, return the best-fit label; otherwise return null.
+- workspace_hint_confidence: 0.0 to 1.0. Use >0.8 only for a clear cue. Do not guess.
 
 Return ONLY valid JSON. No markdown, no explanation."""
 

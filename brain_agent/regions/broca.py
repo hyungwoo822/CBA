@@ -209,6 +209,30 @@ class BrocaArea(BrainRegion):
         if "response_text" in signal.payload:
             signal.payload["response_text"] = formatted
 
+    async def format_response(
+        self,
+        pfc_output: str | None,
+        response_mode: str = "normal",
+        clarification_questions: list[str] | None = None,
+        language: str = "en",
+    ) -> str:
+        """Unified response formatter for normal and block-mode output."""
+        questions = clarification_questions or []
+        if response_mode == "block" and questions:
+            return self._format_questions(questions, language)
+        if pfc_output is None:
+            return ""
+        return self._clean_text(str(pfc_output))
+
+    def _format_questions(self, questions: list[str], language: str) -> str:
+        """Render clarification questions without changing their language."""
+        cleaned = [q.strip() for q in questions if q and q.strip()]
+        if not cleaned:
+            return ""
+        if len(cleaned) == 1:
+            return cleaned[0]
+        return "\n".join(f"- {q}" for q in cleaned)
+
     @staticmethod
     def _clean_text(text: str) -> str:
         """Basic text cleanup (whitespace normalization)."""

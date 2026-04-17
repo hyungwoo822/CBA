@@ -35,6 +35,32 @@ Fast navigation index for this repo. Read this **before** exploring the codebase
 |---|---|
 | `test_personal_adapter.py` | Phase 4 adapter passthrough, node rendering, write-back, and round-trip tests |
 | `test_phase4_smoke.py` | Phase 4 regression smoke for legacy `identity_facts` callers |
+| `test_retrieve_with_contradictions.py` | Phase 5 retrieval post-processing tests for contradictions and reconstruction gaps |
+| `test_workspace_awareness_backward_compat.py` | Phase 5 signature compatibility tests for workspace-aware exports and staging |
+
+## `tests/pipeline/` — Phase 5 Pipeline Integration Tests
+
+| File | Purpose |
+|---|---|
+| `__init__.py` | Package marker for pipeline integration tests |
+| `test_pipeline_extraction_integration.py` | Orchestrator wiring, response-mode branching, workspace, and S1/S2 propagation tests |
+| `test_pipeline_expression_override.py` | Expression-mode `block` to `append` override coverage |
+| `test_phase5_smoke.py` | End-to-end Phase 5 normal/block/append smoke tests |
+| `test_pipeline_dashboard_events.py` | Clarification-request event emission test for block mode |
+
+## `tests/config/` — Config Test Additions
+
+| File | Purpose |
+|---|---|
+| `test_extraction_config.py` | ExtractionConfig and WorkspaceConfig defaults + BrainAgentConfig wiring |
+
+## `tests/regions/` — Phase 5 Region Test Additions
+
+| File | Purpose |
+|---|---|
+| `test_broca_block_mode.py` | Broca block-mode clarification question formatting |
+| `test_wernicke_workspace_hint.py` | Wernicke pragmatic workspace hint parsing and M1 annotation |
+| `test_expression_mode_instruction.py` | PFC expression-mode workspace/contradiction/gap wording |
 
 ---
 
@@ -45,7 +71,7 @@ Fast navigation index for this repo. Read this **before** exploring the codebase
 | `__init__.py` | Public exports (`BrainAgent`) |
 | `__main__.py` | `python -m brain_agent` entry |
 | `agent.py` | **Main class `BrainAgent`** — orchestrates pipeline, memory, channels, lifespan |
-| `pipeline.py` | **`ProcessingPipeline`** — 7-phase neural pipeline; hosts PSC currently (Phase 3 plan replaces this) |
+| `pipeline.py` | **`ProcessingPipeline`** — 7-phase neural pipeline with Phase 5 extraction orchestrator integration |
 
 ## `brain_agent/regions/` — 23 Brain Regions
 
@@ -89,7 +115,7 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 | `embedding_cache.py` | SHA256-keyed LRU embedding cache |
 | `reflection.py` | Stub — future reflection mechanism |
 
-**Knowledge Layer — Phase 0 (newly added, uncommitted):**
+**Knowledge Layer:**
 
 | File | Purpose |
 |---|---|
@@ -97,19 +123,31 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 | `ontology_store.py` | Node/relation type registry with 4-tier confidence + proposal queue |
 | `ontology_seed.py` | Universal ontology constants (7 node + 10 relation types) |
 | `personal_adapter.py` | Personal workspace adapter bridging `identity_facts` to Person workspace nodes |
+| `raw_vault.py` | SHA256-addressed raw input vault for lossless source storage |
+| `contradictions_store.py` | Workspace-scoped contradiction queue and subject batch lookup |
+| `open_questions_store.py` | Workspace-scoped clarifying question queue |
 
 **Planned (see `docs/knowledge_layer_plan.md`):**
 
 | Planned file | Phase | Purpose |
 |---|---|---|
-| `raw_vault.py` | 1 | SHA256 raw vault (lossless input storage) |
-| `contradictions_store.py` | 2 | Contradiction detection queue |
-| `open_questions_store.py` | 2 | Clarifying question queue |
 | `templates/software_project.py` etc. | 7 | Domain ontology templates |
 
-## `brain_agent/extraction/` — Multi-stage Extractor (Planned, Phase 3)
+## `brain_agent/extraction/` — Multi-stage Extractor
 
-**Does not exist yet.** Target files: `types.py`, `triage.py`, `extractor.py`, `temporal_resolver.py`, `validator.py`, `severity.py`, `refiner.py`, `orchestrator.py`, `config.py`. See `docs/superpowers/plans/2026-04-17-phase-3-multi-stage-extractor.md`.
+| File | Purpose |
+|---|---|
+| `config.py` | Dataclass config for extractor stages and response-mode behavior |
+| `types.py` | Dataclass contracts for triage, temporal resolution, validation, severity, and extraction results |
+| `triage.py` | Stage 1 input classification, skip-stage logic, and workspace hint handling |
+| `extractor.py` | Stage 2 ontology-aware structured extraction from user text |
+| `temporal_resolver.py` | Stage 2.5 temporal update/contradiction classification |
+| `validator.py` | Stage 3 contradiction, missing-property, pattern-separation, and FOK validation |
+| `severity.py` | Stage 4 response-mode decision from contradictions and open questions |
+| `refiner.py` | Stage 5 personal-workspace response polishing |
+| `orchestrator.py` | Multi-stage extraction coordinator with raw vault, staging, contradictions, questions, and proposals |
+| `_mock_llm.py` | Recording LLM provider used by extraction tests |
+| `__init__.py` | Extraction package marker |
 
 ## `brain_agent/migrations/` — Schema Migration Runner
 
@@ -151,7 +189,7 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 | File | Purpose |
 |---|---|
 | `server.py` | FastAPI app + `/ws` WebSocket + REST endpoints (`/api/*`) |
-| `emitter.py` | Event emitter (region_activation, memory_event, knowledge_update, …) — Phase 8 adds workspace/curation events |
+| `emitter.py` | Event emitter (region_activation, memory_event, knowledge_update, clarification_requested; Phase 8 adds workspace/curation events) |
 
 ## `brain_agent/cli/` — CLI
 
@@ -163,9 +201,7 @@ Each region is a self-contained class in its own file. Regions mix LLM-backed an
 
 | File | Purpose |
 |---|---|
-| `schema.py` | Pydantic config models (loaded from env + `.env`) |
-
-Planned additions (Phase 0/3): `WorkspaceConfig`, `ExtractionConfig` (per-call-site model fields).
+| `schema.py` | Pydantic config models including extraction and workspace settings (loaded from env + `.env`) |
 
 ## `brain_agent/channels/` — External Chat Adapters
 

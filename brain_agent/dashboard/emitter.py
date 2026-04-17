@@ -80,3 +80,7 @@ class DashboardEmitter:
     async def knowledge_diff(self, diff: dict) -> None:
         """Emit neuroplasticity diff (LTP/LTD/synaptogenesis/pruning)."""
         await event_bus.emit("knowledge_diff", diff)
+
+    async def clarification_requested(self, payload: dict) -> None:
+        """Emit extraction-time clarification questions."""
+        await event_bus.emit("clarification_requested", payload)

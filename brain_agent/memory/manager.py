@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from typing import Callable, TYPE_CHECKING
 
@@ -27,6 +28,8 @@ from brain_agent.memory.contradictions_store import ContradictionsStore
 from brain_agent.memory.open_questions_store import OpenQuestionsStore
 from brain_agent.memory.raw_vault import RawVault
 from brain_agent.migrations import MigrationRunner
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryManager:
@@ -352,6 +355,7 @@ class MemoryManager:
         query: str,
         context: str | None = None,
         top_k: int = 5,
+        workspace_id: str | None = None,
     ) -> list[dict]:
         """Retrieve relevant memories using multi-factor scoring.
 
@@ -368,13 +372,17 @@ class MemoryManager:
 
         async def _fetch_semantic() -> list[dict]:
             try:
-                return await self.semantic.search(query, top_k=top_k * 2)
+                return await self.semantic.search(
+                    query, top_k=top_k * 2, workspace_id=workspace_id,
+                )
             except Exception:
                 return []
 
         async def _fetch_episodic() -> list[dict]:
             try:
-                return await self.episodic.get_recent(limit=top_k * 4)
+                return await self.episodic.get_recent(
+                    limit=top_k * 4, workspace_id=workspace_id,
+                )
             except Exception:
                 return []
 
@@ -452,7 +460,9 @@ class MemoryManager:
             async def _search_node(node: str, act_level: float) -> list[dict]:
                 results = []
                 try:
-                    for mem in await self.semantic.search(node, top_k=3):
+                    for mem in await self.semantic.search(
+                        node, top_k=3, workspace_id=workspace_id,
+                    ):
                         relevance = 1.0 - min(1.0, mem.get("distance", 0.5) or 0.5)
                         results.append({
                             "id": mem["id"],
@@ -557,6 +567,84 @@ class MemoryManager:
             self.recall_tracker.save()
 
         return top_results
+
+    async def retrieve_with_contradictions(
+        self,
+        query: str,
+        workspace_id: str | None = None,
+        top_k: int = 10,
+        context: str | None = None,
+    ) -> dict:
+        """Retrieve with S1 conflict monitoring and S2 reconstruction gaps.
+
+        This wraps the legacy list-returning retrieve() API and normalizes the
+        result into a bundle for pipeline metadata.
+        """
+        base = await self.retrieve(
+            query=query,
+            workspace_id=workspace_id,
+            top_k=top_k,
+            context=context,
+        )
+        result = (
+            {"candidates": base, "edges": [], "nodes": []}
+            if isinstance(base, list)
+            else dict(base)
+        )
+
+        result.setdefault("candidates", [])
+        result.setdefault("edges", [])
+        result.setdefault("nodes", [])
+        result.setdefault("contradictions", [])
+        result.setdefault("gaps", [])
+        result.setdefault("inference_fill", [])
+
+        if workspace_id and getattr(self, "contradictions", None) is not None:
+            subject_ids = sorted({
+                edge.get("subject")
+                for edge in result.get("edges", [])
+                if isinstance(edge, dict) and edge.get("subject")
+            })
+            if subject_ids:
+                try:
+                    contra_map = await self.contradictions.get_for_subject_batch(
+                        workspace_id, subject_ids,
+                    )
+                    result["contradictions"] = [
+                        contradiction
+                        for entries in (contra_map or {}).values()
+                        for contradiction in entries
+                    ]
+                except Exception:
+                    logger.debug("Contradiction batch lookup failed", exc_info=True)
+
+        ontology = getattr(self, "ontology", None)
+        if ontology is not None:
+            for node in result.get("nodes", []):
+                if not isinstance(node, dict):
+                    continue
+                type_id = node.get("type_id")
+                if not type_id:
+                    continue
+                try:
+                    resolver = getattr(ontology, "resolve_node_type_by_id", None)
+                    type_def = await resolver(type_id) if resolver else None
+                except Exception:
+                    type_def = None
+                if not type_def:
+                    continue
+                schema = type_def.get("schema", {}) or {}
+                required = schema.get("required", []) or []
+                props = node.get("properties", {}) or {}
+                for prop in required:
+                    if prop not in props:
+                        result["gaps"].append({
+                            "node": node.get("label", node.get("id", "")),
+                            "missing": prop,
+                            "type": type_def.get("name", ""),
+                        })
+
+        return result
 
     async def store_semantic_facts(
         self,

@@ -3,6 +3,10 @@
 Provides Leiden community detection, hub identification, cross-community
 bridge detection, cohesion scoring, and graph diffing.
 
+Workspace filtering is handled before this module by
+SemanticStore.export_as_networkx(workspace_id=...). These functions operate
+on the already-filtered graph they receive.
+
 Neuroscience grounding:
 - Community detection = cortical columns (Mountcastle 1997)
 - Hub nodes = rich-club organization (van den Heuvel & Sporns 2011)

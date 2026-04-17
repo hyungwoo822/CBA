@@ -72,7 +72,10 @@ class TemporoparietalJunction(BrainRegion):
 
     def get_user_model(self) -> dict:
         """Return the raw user model layers."""
+        facts = list(self._identity_facts) + list(self._graph_facts)
         return {
+            "schema": self.get_user_context(),
+            "facts": facts,
             "identity_facts": list(self._identity_facts),
             "graph_facts": list(self._graph_facts),
         }
@@ -132,6 +135,9 @@ class TemporoparietalJunction(BrainRegion):
                 obj = fact.get("object", "?")
                 lines.append(f"- {subj} | {pred} | {obj}")
             parts.append("\n".join(lines))
+
+        if not parts:
+            return "# User Profile\n- No stored user facts yet."
 
         return "\n\n".join(parts)
 

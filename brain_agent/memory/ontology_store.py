@@ -380,6 +380,16 @@ class OntologyStore:
             return None
         return await self._get_node_type_by_name(UNIVERSAL_WORKSPACE_ID, name)
 
+    async def resolve_node_type_by_id(self, type_id: str) -> dict | None:
+        """Resolve a node type by stable id."""
+        assert self._db is not None
+        self._db.row_factory = aiosqlite.Row
+        async with self._db.execute(
+            "SELECT * FROM node_types WHERE id = ?", (type_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        return self._row_to_dict(row) if row else None
+
     async def resolve_relation_type(self, workspace_id: str, name: str) -> dict | None:
         """Resolve local relation type first, then universal fallback."""
         local = await self._get_relation_type_by_name(workspace_id, name)

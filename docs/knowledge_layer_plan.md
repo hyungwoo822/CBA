@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-16
 **Branch:** saju (local only)
-**Status:** Phase 4 complete - moving to Phase 5
+**Status:** Phase 5 complete - moving to Phase 6
 
 ---
 
@@ -1556,6 +1556,8 @@ class PersonalAdapter:
 ---
 
 ### Phase 5 — Pipeline Integration
+
+**Status:** Phase 5 complete - moving to Phase 6
 
 **목표:** 기존 7-phase pipeline 에 새 knowledge layer 연결
 **산출물:** `pipeline.py`, `agent.py` 수정

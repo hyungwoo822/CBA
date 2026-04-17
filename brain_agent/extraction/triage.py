@@ -97,7 +97,12 @@ class Triage:
         workspace_ask: str | None = None
         if comprehension and comprehension.get("workspace_hint"):
             hint = str(comprehension["workspace_hint"])
-            hint_conf = float(comprehension.get("confidence", 0.0))
+            hint_conf = float(
+                comprehension.get(
+                    "workspace_hint_confidence",
+                    comprehension.get("confidence", 0.0),
+                )
+            )
             if hint_conf > 0.8 and hint != current_ws:
                 candidate = await self._ws.get_workspace(hint)
                 if candidate is not None:

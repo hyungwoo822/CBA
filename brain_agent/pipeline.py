@@ -32,6 +32,8 @@ from brain_agent.core.predictor import Predictor
 from brain_agent.core.network_modes import TripleNetworkController, NetworkMode
 from brain_agent.core.router import ThalamicRouter
 from brain_agent.core.workspace import GlobalWorkspace
+from brain_agent.config.schema import ExtractionConfig
+from brain_agent.extraction.orchestrator import ExtractionOrchestrator
 from brain_agent.memory.manager import MemoryManager
 from brain_agent.memory.working_memory import WorkingMemoryItem
 from brain_agent.regions.thalamus import Thalamus
@@ -103,6 +105,13 @@ class PipelineResult:
     memories_retrieved: list[dict] = field(default_factory=list)
     memory_encoded: bool = False
     from_cache: bool = False
+    response_mode: str = "normal"
+    clarification_questions: list[str] = field(default_factory=list)
+    workspace_id: str = ""
+    workspace_ask: str | None = None
+    retrieval_contradictions: list[dict] = field(default_factory=list)
+    retrieval_gaps: list[dict] = field(default_factory=list)
+    retrieval_inference_fill: list[dict] = field(default_factory=list)
 
 
 class ProcessingPipeline:
@@ -116,15 +125,22 @@ class ProcessingPipeline:
         tool_registry=None,
         max_tool_iterations: int = 10,
         barrier_mw=None,
+        extraction_config=None,
     ):
         self.memory = memory
         self.tool_registry = tool_registry
         self.max_tool_iterations = max_tool_iterations
-        self._llm_provider = llm_provider  # Keep direct reference for Phase 5 consolidation
+        self._llm_provider = llm_provider
         # Barrier middleware (BBB + SynapticTimeout + MicroglialDefense)
         # gates every tool execution like the blood-brain barrier
         # selectively permits substances crossing the neural boundary.
         self._barrier_mw = barrier_mw
+        self._session_id = ""
+        self.extraction_orchestrator = ExtractionOrchestrator(
+            memory=memory,
+            llm_provider=llm_provider,
+            config=extraction_config or ExtractionConfig(),
+        )
         self.neuromodulators = Neuromodulators()
         self.network_ctrl = TripleNetworkController()
         self.router = ThalamicRouter(
@@ -280,80 +296,6 @@ class ProcessingPipeline:
                 logger.warning("Failed to end tool trace: %s", tool_name)
 
         return result
-
-    _PSC_SYSTEM_PROMPT = (
-        "You are the Post-Synaptic Consolidation processor — the brain's sleep-replay system "
-        "(Diekelmann & Born 2010). Given a conversation turn, perform THREE tasks simultaneously:\n\n"
-        "1. **Refine response** (Broca): Polish the agent's response for natural language quality. "
-        "If the response is already good, set refined_response to null.\n"
-        "2. **Extract user facts** (Hippocampus): Extract entities AND their relationships as a "
-        "story graph. Not just isolated facts — capture causal chains and context.\n"
-        "3. **Evaluate procedural pattern** (Striatum): If this interaction pattern is reusable, "
-        "output trigger+strategy. If not (trivial greetings, one-off questions), set procedural to null.\n\n"
-        "Output ONLY valid JSON:\n"
-        '{"refined_response": "..." | null,\n'
-        ' "user_facts": {"entities": ["e1"], "relations": [["subj","rel","obj",conf,"CAT"]]},\n'
-        ' "procedural": {"trigger": "pattern", "strategy": "approach"} | null}\n\n'
-        "Rules for user_facts:\n"
-        "- ALL entities in English lowercase. ALL relations in English verb infinitives.\n"
-        "- Strip Korean particles from names: '짬뽕을'→'jjambbong', '형푸야'→'hyungpu'\n"
-        "- Confidence: 1.0=explicit, 0.8=implied, 0.6=inferred\n"
-        "- Categories: PREFERENCE|ACTION|ATTRIBUTE|SOCIAL|CAUSAL|IDENTITY|EMOTION|SPATIAL\n"
-        "- Build a STORY GRAPH — connect entities to each other, not just user→X:\n"
-        '  e.g. "짬뽕 먹다가 홍합이 목에 걸려서 병원 갔어" →\n'
-        '    ["user","eat","jjambbong",1.0,"ACTION"],\n'
-        '    ["jjambbong","contain","mussel",0.8,"CAUSAL"],\n'
-        '    ["mussel","get_stuck_in","throat",1.0,"CAUSAL"],\n'
-        '    ["mussel","cause","hospital_visit",0.8,"CAUSAL"],\n'
-        '    ["user","visit","hospital",1.0,"ACTION"]\n'
-        "- Include WHY/HOW links (CAUSAL), not just WHO/WHAT (ACTION).\n"
-        "- Skip greetings — do NOT extract greeting-related facts.\n"
-        "- PREFERENCE CHANGES are critical: if user reveals a change in preference, emotion, "
-        "or attitude (e.g., 'I used to like X but now I don\'t'), mark confidence=1.0. "
-        "This is a confirmed correction, not inference."
-    )
-
-    async def _post_synaptic_consolidation(
-        self,
-        original_input: str,
-        agent_response: str,
-        comprehension: dict,
-    ) -> dict:
-        """Single background LLM call merging Broca + fact extraction + procedural.
-
-        Analogous to hippocampal replay during slow-wave sleep (Diekelmann & Born 2010).
-        """
-        provider = getattr(self.pfc, 'llm_provider', None) or self._llm_provider
-        if not provider:
-            return {"refined_response": None, "user_facts": {"entities": [], "relations": []}, "procedural": None}
-
-        user_msg = (
-            f"User input: {original_input}\n"
-            f"Agent response: {agent_response}\n"
-            f"Detected intent: {comprehension.get('intent', 'unknown')}\n"
-            f"Language: {comprehension.get('language', 'auto')}"
-        )
-
-        try:
-            response = await provider.chat(
-                messages=[
-                    {"role": "system", "content": self._PSC_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_msg},
-                ],
-                max_tokens=1000,
-                temperature=0.1,
-            )
-            if response and response.content:
-                import json as _json
-                text = response.content.strip()
-                if text.startswith("```"):
-                    lines = [l for l in text.split("\n") if not l.strip().startswith("```")]
-                    text = "\n".join(lines).strip()
-                return _json.loads(text)
-        except Exception as e:
-            logger.warning("Post-Synaptic Consolidation failed: %s", e)
-
-        return {"refined_response": None, "user_facts": {"entities": [], "relations": []}, "procedural": None}
 
     async def restore_brain_state(self) -> None:
         """Load persisted neuromodulator and activation state from DB.
@@ -516,65 +458,6 @@ class ProcessingPipeline:
         if stored:
             logger.info("Realtime identity facts stored: %d (source=%s)", stored, source)
         return stored
-
-    async def _extract_user_facts(self, user_input: str, comprehension: dict) -> dict | None:
-        """Extract facts about the user directly from their input (not from PFC response).
-
-        This captures what the user explicitly said — preferences, states, habits —
-        without the agent's interpretation layer. Produces richer user-centric
-        knowledge graph entries.
-        """
-        intent = comprehension.get("intent", "unknown")
-        keywords = comprehension.get("keywords", [])
-        prompt = (
-            "Extract facts about the user from their input. Build a MULTI-ENTITY GRAPH:\n"
-            "1. User-centric facts (user as subject: habits, preferences, states)\n"
-            "2. User's world entities (people, places, objects connected to user's life)\n"
-            "3. Causal/relational chains between entities\n\n"
-            f"User said: {user_input}\n"
-            f"Detected intent: {intent}\n"
-            f"Keywords: {', '.join(keywords)}\n\n"
-            "Output ONLY valid JSON:\n"
-            '{"entities": ["entity1", "entity2"], '
-            '"relations": [["subject", "relation", "object", confidence, "CATEGORY"]]}\n\n'
-            "Rules:\n"
-            "- ALL entities MUST be English lowercase nouns. NEVER use Korean/non-English.\n"
-            "- ALL relations MUST be English verb infinitives: 'like', 'eat', 'cause'\n"
-            "- Build GRAPH STRUCTURE: multiple entities with edges between them.\n"
-            "  NOT just 'user → X', but also 'X → relation → Y' edges.\n"
-            "- Example: '할머니가 병원 오셨어' →\n"
-            '  [["user","have","grandmother",1.0,"SOCIAL"],'
-            '["grandmother","visit","user",1.0,"ACTION"],'
-            '["grandmother","location","hospital",0.8,"SPATIAL"]]\n'
-            "- Example: '119 전화했는데 기분 나빠' →\n"
-            '  [["user","call","119",1.0,"ACTION"],'
-            '["119","cause","bad mood",0.8,"CAUSAL"],'
-            '["user","experience","bad mood",1.0,"EMOTION"]]\n'
-            "- Confidence: 1.0=explicit, 0.8=implied, 0.6=inferred, 0.4=guess\n"
-            "- STRIP Korean particles from names: '형푸야'→'hyungpu', '현우는'→'hyunwoo'.\n"
-            "  Particles: 야/이야/는/은/가/이/를/을/도/에/에서/한테/의\n"
-            "  '나는 X야' → name is X, NOT Xya.\n"
-            "- If user corrects a fact, output the CORRECTED value with confidence 1.0.\n"
-            "- category: PREFERENCE|ACTION|ATTRIBUTE|SOCIAL|CAUSAL|SPATIAL|TEMPORAL|IDENTITY|EMOTION\n"
-            "- Produce at least 2-3 triples per statement. Return empty ONLY if truly nothing."
-        )
-        try:
-            response = await self.pfc.llm_provider.chat([
-                {"role": "system", "content": "You extract structured facts from user messages. Return only JSON."},
-                {"role": "user", "content": prompt},
-            ], max_tokens=300, temperature=0.1)
-            if response and response.content:
-                import json as _json
-                text = response.content.strip()
-                if text.startswith("```"):
-                    lines = [l for l in text.split("\n") if not l.strip().startswith("```")]
-                    text = "\n".join(lines).strip()
-                data = _json.loads(text)
-                if isinstance(data, dict):
-                    return data
-        except Exception:
-            logger.debug("User fact extraction LLM failed", exc_info=True)
-        return None
 
     def _apply_gain(self, region, profile: dict[str, float]) -> None:
         """Scale a region's activation_level by its activation profile gain.
@@ -952,6 +835,73 @@ class ProcessingPipeline:
             "network_mode": self.network_ctrl.current_mode.value,
         })
 
+        # Phase 3.5: Knowledge Curation (Extraction Orchestrator)
+        # Replaces the legacy consolidation extractor. It runs before PFC so
+        # severe validation findings can block answer generation.
+        _phase35_run = self._start_phase(
+            "phase.3_5_knowledge_curation",
+            inputs={"text": text[:200]},
+        )
+        session_id = getattr(self, "_session_id", "") or ""
+        extraction_result = None
+        try:
+            extraction_result = await self.extraction_orchestrator.extract(
+                text=text,
+                image=image,
+                audio=audio,
+                session_id=session_id,
+                language=comprehension.get("language", "auto"),
+                comprehension=comprehension,
+            )
+        except Exception as e:
+            logger.warning("Extraction orchestrator failed: %s", e, exc_info=True)
+        self._end_phase(_phase35_run, outputs={
+            "workspace_id": getattr(extraction_result, "workspace_id", ""),
+            "response_mode": getattr(extraction_result, "response_mode", "normal"),
+        })
+
+        effective_mode = (
+            getattr(extraction_result, "response_mode", "normal")
+            if extraction_result is not None
+            else "normal"
+        )
+        if (
+            extraction_result is not None
+            and interaction_mode == "expression"
+            and effective_mode == "block"
+            and getattr(self.extraction_orchestrator.config, "expression_override_block", True)
+        ):
+            effective_mode = "append"
+
+        if extraction_result is not None and effective_mode == "block":
+            questions = list(getattr(extraction_result, "clarification_questions", []) or [])
+            formatted_questions = await self.broca.format_response(
+                pfc_output=None,
+                response_mode="block",
+                clarification_questions=questions,
+                language=comprehension.get("language", "en"),
+            )
+            self.broca.emit_activation(0.5)
+            await self._emit("region_activation", "broca", self.broca.activation_level, "active")
+            await self._emit(
+                "clarification_requested",
+                {
+                    "questions": questions,
+                    "severity": "severe",
+                    "workspace_id": getattr(extraction_result, "workspace_id", ""),
+                },
+            )
+            result.response = formatted_questions
+            result.response_mode = "block"
+            result.clarification_questions = questions
+            result.workspace_id = getattr(extraction_result, "workspace_id", "")
+            result.workspace_ask = getattr(extraction_result, "workspace_ask", None)
+            result.network_mode = self.network_ctrl.current_mode.value
+            result.signals_processed = signals_count
+            self._clear_llm_trace()
+            self._current_trace_run = None
+            return result
+
         # ══════════════════════════════════════════════════════════════
         # Phase 6: Retrieval (Squire 2004, Tulving 2002)
         # Hippocampus + PFC + Angular Gyrus pattern completion
@@ -960,11 +910,18 @@ class ProcessingPipeline:
         _phase6_run = self._start_phase("phase.6_retrieval", inputs={"query": text[:200]})
 
         wm_context = self.memory.working.get_context()
-        retrieved = await self.memory.retrieve(
+        retrieval_bundle = await self.memory.retrieve_with_contradictions(
             query=text,
+            workspace_id=getattr(extraction_result, "workspace_id", None) or None,
             context=wm_context,
             top_k=5,
         )
+        if isinstance(retrieval_bundle, list):
+            retrieval_bundle = {"candidates": retrieval_bundle}
+        retrieved = retrieval_bundle.get("candidates", [])
+        result.retrieval_contradictions = retrieval_bundle.get("contradictions", [])
+        result.retrieval_gaps = retrieval_bundle.get("gaps", [])
+        result.retrieval_inference_fill = retrieval_bundle.get("inference_fill", [])
         result.memories_retrieved = retrieved
 
         # Attention-weighted retrieval boost
@@ -1020,6 +977,9 @@ class ProcessingPipeline:
         # ── Build upstream context for PFC (Miller & Cohen 2001) ──
         # Accumulate ALL upstream processing results so PFC has full context
         input_signal.metadata["retrieved_memories"] = retrieved
+        input_signal.metadata["retrieval_contradictions"] = result.retrieval_contradictions
+        input_signal.metadata["retrieval_gaps"] = result.retrieval_gaps
+        input_signal.metadata["retrieval_inference_fill"] = result.retrieval_inference_fill
         if cached_procedure:
             input_signal.metadata["cached_procedure"] = cached_procedure
         input_signal.metadata["network_mode"] = self.network_ctrl.current_mode.value
@@ -1050,6 +1010,10 @@ class ProcessingPipeline:
             "memory_context": memory_context,
             # Phase 3: Insula interoceptive state (Craig 2009)
             "interoceptive_state": input_signal.metadata.get("interoceptive_state", {}),
+            # Phase 5 read-side post-processing: contradictions and gaps.
+            "retrieval_contradictions": result.retrieval_contradictions,
+            "retrieval_gaps": result.retrieval_gaps,
+            "retrieval_inference_fill": result.retrieval_inference_fill,
         }
 
         await self._emit("signal_flow", "hippocampus", "prefrontal_cortex", "RETRIEVE", 0.7)
@@ -1383,7 +1347,7 @@ class ProcessingPipeline:
                     self.neuro_ctrl.on_prediction_error(pred_error, pred, actual_outcome)
                     await self._emit("neuromodulator_update", **self.neuromodulators.snapshot())
 
-                    # Procedural learning deferred to PSC (Post-Synaptic Consolidation)
+                    # Procedural learning is handled by the extraction orchestrator.
 
                     self.neuro_ctrl.on_reward_outcome(success=(pred_error < 0.3))
                     await self._emit("neuromodulator_update", **self.neuromodulators.snapshot())
@@ -1442,7 +1406,7 @@ class ProcessingPipeline:
                         await self._emit("region_activation", "vta", self.vta.activation_level, "active")
                         await self._step()
 
-                    # Procedural learning deferred to PSC (Post-Synaptic Consolidation)
+                    # Procedural learning is handled by the extraction orchestrator.
 
                     # Neuromodulator: reward outcome → 5-HT (Doya 2002)
                     self.neuro_ctrl.on_reward_outcome(success=(pred_error < 0.3))
@@ -1569,76 +1533,6 @@ class ProcessingPipeline:
                 await self._emit("region_processing", "hippocampus", "phase_4",
                     f"Encoded to hippocampus: {encode_modality} modality, strength={lr:.2f}")
 
-                # ── Post-Synaptic Consolidation (unified background LLM) ──
-                # Merges Broca refinement + fact extraction + procedural eval
-                # into single consolidation cycle (Diekelmann & Born 2010)
-
-                # PFC entity extraction removed — PSC is the sole extractor.
-                # The old keyword fallback (intent + keywords → dummy triples)
-                # produced garbage like "user inform 짬뽕" and is no longer needed.
-
-                # 2. PSC: single LLM call for user facts + procedural (replaces _extract_user_facts + procedural eval)
-                if self.pfc.llm_provider and _comprehension.get("intent"):
-                    # ── Trace: PSC span ──
-                    _psc_run = None
-                    if _trace_run:
-                        try:
-                            _psc_run = _trace_run.create_child(
-                                name="phase.psc_consolidation", run_type="chain",
-                                inputs={"input": _input_text[:200]}, extra={},
-                            )
-                            self._set_llm_trace(_psc_run, "psc")
-                        except Exception:
-                            pass
-                    try:
-                        psc_result = await self._post_synaptic_consolidation(
-                            original_input=_input_text,
-                            agent_response=result.response,
-                            comprehension=_comprehension,
-                        )
-
-                        # User facts from PSC
-                        u_facts = psc_result.get("user_facts", {})
-                        if u_facts.get("entities") or u_facts.get("relations"):
-                            await self.memory.store_semantic_facts(
-                                entities=u_facts.get("entities", []),
-                                relations=u_facts.get("relations", []),
-                                origin="user_input",
-                            )
-                            await self._store_identity_facts_realtime(
-                                u_facts.get("relations", []), source="psc_consolidation",
-                            )
-                            # Enrich episodic memory with PSC story graph
-                            await self.memory.staging.update_entities(
-                                _episodic_mem_id, {
-                                    "extracted_entities": u_facts.get("entities", []),
-                                    "extracted_relations": u_facts.get("relations", []),
-                                },
-                            )
-
-                        # Procedural from PSC
-                        proc = psc_result.get("procedural")
-                        if proc and proc.get("trigger"):
-                            try:
-                                await self.memory.procedural.save(
-                                    trigger_pattern=proc["trigger"],
-                                    strategy=proc["strategy"],
-                                    action_sequence=[],
-                                )
-                                logger.info("PSC procedural: cached '%s'", proc["trigger"])
-                            except Exception as e:
-                                logger.warning("PSC procedural save failed: %s", e)
-                    except Exception:
-                        logger.warning("PSC consolidation failed", exc_info=True)
-                    finally:
-                        if _psc_run:
-                            try:
-                                _psc_run.end(outputs={})
-                                _psc_run.post()
-                            except Exception:
-                                pass
-                        self._clear_llm_trace()
-
                 # ── Phase 5: Consolidation ──
                 staging_count = await self.memory.staging.count_unconsolidated()
                 hypo_result = _hypo_result_ref[0]
@@ -1733,29 +1627,19 @@ class ProcessingPipeline:
 
         # ══════════════════════════════════════════════════════════════
         # Phase 7: Speech Production (Levelt 1989)
-        # Runs in BACKGROUND — Broca refines, M1 formats.
-        # If Broca produces a different response, broadcast via WS.
+        # Lightweight Broca formatting runs before return; longer response
+        # refinement is owned by the extraction orchestrator.
         # ══════════════════════════════════════════════════════════════
 
-        _plan_signal_broca = plan_signal
-        _pfc_response = result.response  # snapshot before Broca
-        _activation_profile = activation_profile
-        _comprehension_broca = comprehension
-
-        async def _background_broca() -> None:
-            """Phase 7: Broca heuristic formatting (LLM refinement via PSC)."""
+        if plan_signal:
             try:
-                if not _plan_signal_broca:
-                    return
-                self.broca._format_heuristic(_plan_signal_broca)
+                self.broca._format_heuristic(plan_signal)
                 self.broca.emit_activation(0.4)
-                self._apply_gain(self.broca, _activation_profile)
+                self._apply_gain(self.broca, activation_profile)
                 await self._emit("region_activation", "broca", self.broca.activation_level, "active")
-                await self._emit("region_processing", "broca", "phase_7", "Heuristic formatting (PSC handles refinement)")
+                await self._emit("region_processing", "broca", "phase_7", "Heuristic formatting")
             except Exception as e:
-                logger.warning("Background Broca failed: %s", e)
-
-        _aio.create_task(_background_broca())
+                logger.warning("Broca formatting failed: %s", e)
 
         # ── GWT Broadcast (Baars 1988) — lightweight, in-memory
         self.workspace.submit(
@@ -1804,6 +1688,13 @@ class ProcessingPipeline:
         # Phase 4 (encoding), KG storage, Phase 5 (consolidation),
         # Phase 7 (Broca refinement), dreaming, neuromodulator decay,
         # and brain state persistence all proceed in background.
+        if extraction_result is not None:
+            result.response_mode = effective_mode
+            result.clarification_questions = list(
+                getattr(extraction_result, "clarification_questions", []) or []
+            )
+            result.workspace_id = getattr(extraction_result, "workspace_id", "")
+            result.workspace_ask = getattr(extraction_result, "workspace_ask", None)
         result.network_mode = self.network_ctrl.current_mode.value
         result.signals_processed = signals_count
         return result

@@ -34,6 +34,11 @@ class ExtractionOrchestrator:
         self._validator = Validator(memory.semantic, memory.ontology, self._cfg)
         self._refiner = Refiner(llm_provider, self._cfg)
 
+    @property
+    def config(self) -> ExtractionConfig:
+        """Expose effective config for pipeline integration and tests."""
+        return self._cfg
+
     async def extract(
         self,
         text: str,
@@ -124,6 +129,7 @@ class ExtractionOrchestrator:
             response_text=response_text,
             response_mode=severity.response_mode,
             clarification_questions=clarification_questions,
+            workspace_ask=triage.workspace_ask,
         )
 
     async def _persist(
@@ -228,7 +234,11 @@ class ExtractionOrchestrator:
                 self._memory.staging.encode,
                 rich_kwargs={
                     "content": extracted.narrative_chunk,
-                    "entities": {"nodes": [node.get("label") for node in extracted.nodes]},
+                    "entities": {
+                        "intent": triage.input_kinds[0] if triage.input_kinds else "unknown",
+                        "keywords": [],
+                        "nodes": [node.get("label") for node in extracted.nodes],
+                    },
                     "workspace_id": workspace_id,
                     "source_id": source["id"],
                     "event_type": triage.input_kinds[0] if triage.input_kinds else "unknown",
@@ -241,6 +251,8 @@ class ExtractionOrchestrator:
                 fallback_kwargs={
                     "content": extracted.narrative_chunk,
                     "entities": {
+                        "intent": triage.input_kinds[0] if triage.input_kinds else "unknown",
+                        "keywords": [],
                         "nodes": [node.get("label") for node in extracted.nodes],
                         "source_id": source["id"],
                         "input_kinds": list(triage.input_kinds),

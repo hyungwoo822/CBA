@@ -91,14 +91,17 @@ Rules:
 """
 
 EXPRESSION_MODE_INSTRUCTION = """
-# Expression Mode (Read-Only Memory)
-You answer ONLY from facts stored in your memory. You are a faithful mirror of what you know.
+# Expression Mode (Read-Only Memory, Workspace-Scoped)
+You answer ONLY from facts in the CURRENT WORKSPACE. You are a faithful mirror of what you know.
 
 Rules:
-- If a fact is not in your memory, say "그건 아직 모르겠어" or equivalent.
+- If a fact is not in the current workspace's retrieved memory, say "그건 아직 모르겠어" / "그건 기억에 없어" or the English equivalent.
 - NEVER infer, extrapolate, or guess. No "아마", "~일 수도", "~겠지" expressions.
 - NEVER fill logical gaps with reasoning. If memory says "user visited hospital" but not why, do NOT speculate about the reason.
-- Only state what is explicitly recorded in Retrieved Memories and User Profile.
+- Only state what is explicitly recorded in Retrieved Memories and User Profile for this workspace.
+- When Retrieved Memories carry `retrieval_contradictions`, say naturally that the facts contradict each other and ask for confirmation.
+- When Retrieved Memories carry `retrieval_gaps`, do NOT silently fill them. Acknowledge the missing piece directly.
+- Open questions are already raised by the validator; do not invent new ones in expression mode.
 - Be honest about the boundaries of your knowledge.
 """
 
@@ -332,6 +335,29 @@ class PrefrontalCortex(BrainRegion):
                     ts_str = f"|{ts[:10]}" if len(ts) >= 10 else ""
                 lines.append(f"{i}. [{src}|rel={score:.2f}{ts_str}]{em_str} {content}")
             system_parts.append("# Retrieved Memories (Hippocampus)\n" + "\n".join(lines))
+
+        contradictions = upstream_context.get("retrieval_contradictions", []) or []
+        gaps = upstream_context.get("retrieval_gaps", []) or []
+        inference_fill = upstream_context.get("retrieval_inference_fill", []) or []
+        if contradictions or gaps or inference_fill:
+            lines = ["# Retrieval Integrity (S1/S2)"]
+            for item in contradictions:
+                if isinstance(item, dict):
+                    lines.append(
+                        "- contradiction: "
+                        f"{item.get('subject', '')} {item.get('key', '')} "
+                        f"{item.get('value_a', '')} vs {item.get('value_b', '')}".strip()
+                    )
+            for item in gaps:
+                if isinstance(item, dict):
+                    lines.append(
+                        "- gap: "
+                        f"{item.get('node', '')} missing {item.get('missing', '')}".strip()
+                    )
+            for item in inference_fill:
+                if isinstance(item, dict):
+                    lines.append(f"- inferred fill: {item}")
+            system_parts.append("\n".join(lines))
 
         # Goals
         goal_ctx = self.goals.to_context()

@@ -44,6 +44,31 @@ class DreamingConfig(BaseModel):
     min_unique_queries: int | None = Field(default=None, description="Override preset min_unique_queries")
 
 
+class ExtractionConfig(BaseModel):
+    """Knowledge-layer extraction orchestrator configuration."""
+    triage_model: str = "auto"
+    extract_model: str = "auto"
+    temporal_classify_model: str = "auto"
+    refine_model: str = "auto"
+    max_retry: int = 1
+    enable_severity_block: bool = True
+    promotion_threshold_n: int = Field(default=3, ge=1, le=50)
+    max_open_questions_per_extraction: int = Field(default=3, ge=1)
+    fok_similarity_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+    pattern_separation_label_similarity_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
+    pattern_separation_window_hours: int = Field(default=24, ge=1)
+    # In expression mode, severe extraction findings should not silence the
+    # memory-only answer path; demote block to append unless disabled.
+    expression_override_block: bool = True
+
+
+class WorkspaceConfig(BaseModel):
+    """Workspace defaults."""
+    default_decay_policy: str = "normal"
+    vault_size_threshold_mb: int = Field(default=10, ge=1)
+    vault_dir: str = "vault"
+
+
 class AgentConfig(BaseModel):
     model: str = "openai/gpt-4o-mini"
     provider: str = "auto"
@@ -137,6 +162,8 @@ class BrainAgentConfig(BaseModel):
     middleware: MiddlewareConfig = Field(default_factory=MiddlewareConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     tracing: TracingConfig = Field(default_factory=TracingConfig)
+    extraction: ExtractionConfig = Field(default_factory=ExtractionConfig)
+    workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BrainAgentConfig:
